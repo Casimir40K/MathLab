@@ -1,15 +1,15 @@
 classdef Flowsheet < handle
     properties
         species   % cellstr species list (global order)
-        streams   % cell array of Stream objects
-        units     % cell array of unit objects
+        streams   % cell array of proc.Stream objects
+        units     % cell array of unit objects (proc.units.*) with equations()
     end
 
     methods
         function obj = Flowsheet(species)
             obj.species = species;
             obj.streams = {};
-            obj.units = {};
+            obj.units   = {};
         end
 
         function addStream(obj, s)
@@ -20,34 +20,43 @@ classdef Flowsheet < handle
             obj.units{end+1} = u;
         end
 
-        function [nUnknown, nEq] = checkDOF(obj)
-            % Counts unknowns (based on Stream.known if present, else NaN)
-            % and counts number of equations contributed by all units.
+        function [nUnknown, nEq] = checkDOF(obj, varargin)
+            % checkDOF() prints by default
+            % checkDOF('quiet',true) suppresses printing
+
+            p = inputParser;
+            p.addParameter('quiet', false, @(x)islogical(x)&&isscalar(x));
+            p.parse(varargin{:});
+            quiet = p.Results.quiet;
+
             nUnknown = obj.countUnknowns();
-            nEq = obj.countEquations();
+            nEq      = obj.countEquations();
 
-            fprintf('DOF check:\n');
-            fprintf('  Unknowns:  %d\n', nUnknown);
-            fprintf('  Equations: %d\n', nEq);
+            if ~quiet
+                fprintf('DOF check:\n');
+                fprintf('  Unknowns:  %d\n', nUnknown);
+                fprintf('  Equations: %d\n', nEq);
 
-            if nEq < nUnknown
-                fprintf('  Status: UNDER-CONSTRAINED (need %d more equations/specs)\n', nUnknown - nEq);
-            elseif nEq > nUnknown
-                fprintf('  Status: OVER-CONSTRAINED (have %d extra equations)\n', nEq - nUnknown);
-            else
-                fprintf('  Status: Square (unknowns == equations)\n');
+                if nEq < nUnknown
+                    fprintf('  Status: UNDER-CONSTRAINED (need %d more equations/specs)\n', nUnknown - nEq);
+                elseif nEq > nUnknown
+                    fprintf('  Status: OVER-CONSTRAINED (have %d extra equations)\n', nEq - nUnknown);
+                else
+                    fprintf('  Status: Square (unknowns == equations)\n');
+                end
             end
         end
 
         function solver = solve(obj, varargin)
             % Usage:
             %   solver = fs.solve();
-            %   solver = fs.solve('maxIter',80,'tolAbs',1e-9,'verbose',true);
-            
-            obj.validate();
-            solver = ProcessSolver(obj.streams, obj.units);
+            %   solver = fs.solve('maxIter',80,'tolAbs',1e-9,'printToConsole',true,'consoleStride',10);
 
-            % Optional overrides
+            obj.validate();  % throws if not runnable
+
+            solver = proc.ProcessSolver(obj.streams, obj.units);
+
+            % Optional overrides: apply any name/value pair that matches a solver property
             for k = 1:2:numel(varargin)
                 name = varargin{k};
                 val  = varargin{k+1};
@@ -58,13 +67,15 @@ classdef Flowsheet < handle
                 end
             end
 
+            % Print DOF summary (keep this behavior for now)
             obj.checkDOF();
+
             solver.solve();
         end
 
         function T = streamTable(obj)
             % Table including: name, n_dot, T, P, y_i, and species molar flows n_i = n_dot*y_i
-            N = numel(obj.streams);
+            N  = numel(obj.streams);
             ns = numel(obj.species);
 
             names = strings(N,1);
@@ -130,26 +141,22 @@ classdef Flowsheet < handle
                         end
                     end
                 else
-                    % no known flags: treat NaNs as unknown; if no NaNs, treat as guess (unknown)
-                    if any(isnan(s.y))
-                        n = n + sum(isnan(s.y));
-                    else
-                        % your physical solver treats any non-known y as unknown (uses softmax)
-                        n = n + ns;
-                    end
+                    % if no known flags exist, treat full y as unknown (matches softmax approach)
+                    n = n + ns;
                 end
             end
 
             function tf = isUnknownField(st, fieldName)
-                if isprop(st,'known') && isfield(st.known, fieldName)
+                if isprop(st,'known') && isstruct(st.known) && isfield(st.known, fieldName)
                     tf = ~st.known.(fieldName);
                 else
-                    tf = isnan(st.(fieldName));
+                    % default: treat as unknown (UI/app will manage known flags)
+                    tf = true;
                 end
             end
 
             function tf = hasKnownY(st)
-                tf = isprop(st,'known') && isfield(st.known,'y') && numel(st.known.y)==ns;
+                tf = isprop(st,'known') && isstruct(st.known) && isfield(st.known,'y') && numel(st.known.y)==ns;
             end
         end
 
@@ -164,25 +171,24 @@ classdef Flowsheet < handle
 
         function validate(obj)
             % Throws an error with a readable message if the model is not runnable.
-        
+
             if isempty(obj.streams)
                 error('Flowsheet has no streams.');
             end
             if isempty(obj.units)
                 error('Flowsheet has no units.');
             end
-        
-            % species consistency
+
             ns = numel(obj.species);
-        
+
             % Stream checks
             for i = 1:numel(obj.streams)
                 s = obj.streams{i};
-        
+
                 if ~isprop(s,'name')
                     error('Stream #%d has no name property.', i);
                 end
-        
+
                 % Check y vector
                 if isempty(s.y) || numel(s.y) ~= ns
                     error('Stream "%s": y must be length %d.', string(s.name), ns);
@@ -197,8 +203,8 @@ classdef Flowsheet < handle
                 if abs(sy - 1) > 1e-6
                     error('Stream "%s": y must sum to 1 (currently %.6g).', string(s.name), sy);
                 end
-        
-                % Scalars
+
+                % Scalars (we require finite initial guesses even if unknown)
                 if ~isfinite(s.n_dot) || s.n_dot <= 0
                     error('Stream "%s": n_dot must be finite and > 0 (currently %.6g).', string(s.name), s.n_dot);
                 end
@@ -208,17 +214,19 @@ classdef Flowsheet < handle
                 if ~isfinite(s.P) || s.P <= 0
                     error('Stream "%s": P must be finite and > 0 (currently %.6g).', string(s.name), s.P);
                 end
-        
-                % known flags sanity (optional but helpful)
+
+                % known flags sanity (required for app workflow)
                 if ~isprop(s,'known') || ~isstruct(s.known)
                     error('Stream "%s": missing known struct. Ensure Stream constructor initializes known.*', string(s.name));
                 end
+
                 req = {'n_dot','T','P','y'};
                 for f = req
                     if ~isfield(s.known, f{1})
                         error('Stream "%s": known.%s missing. Ensure Stream constructor initializes it.', string(s.name), f{1});
                     end
                 end
+
                 if ~islogical(s.known.n_dot) || ~isscalar(s.known.n_dot)
                     error('Stream "%s": known.n_dot must be logical scalar.', string(s.name));
                 end
@@ -232,14 +240,15 @@ classdef Flowsheet < handle
                     error('Stream "%s": known.y must be logical(1,%d).', string(s.name), ns);
                 end
             end
-        
+
             % Unit checks (lightweight)
             for u = 1:numel(obj.units)
                 unit = obj.units{u};
+
                 if ~ismethod(unit, 'equations')
                     error('Unit #%d (%s) has no equations() method.', u, class(unit));
                 end
-                % Try calling equations once to ensure it returns finite numbers
+
                 ru = unit.equations();
                 if isempty(ru)
                     error('Unit #%d (%s): equations() returned empty.', u, class(unit));
@@ -248,9 +257,9 @@ classdef Flowsheet < handle
                     error('Unit #%d (%s): equations() returned NaN/Inf. Check connectivity/initial guesses.', u, class(unit));
                 end
             end
-        
-            % DOF check
-            [nU, nE] = obj.checkDOF();
+
+            % DOF check (quiet inside validate)
+            [nU, nE] = obj.checkDOF('quiet', true);
             if nU ~= nE
                 warning('Flowsheet DOF not square: unknowns=%d, eqs=%d. Solver may still run (LM), but check specs.', nU, nE);
             end
