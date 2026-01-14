@@ -1,2 +1,2 @@
 # MathLab
-MAthLab: a Breaking Bad™ Parody Solver
+MathLab: a Breaking Bad™ Parody Solver
