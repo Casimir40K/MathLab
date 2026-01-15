@@ -7,8 +7,11 @@ classdef ProcessSolver < handle
         maxIter = 60
         tolAbs  = 1e-9
         fdEps   = 1e-7
-        printToConsole = true     % if true, prints some log lines to Command Window
+
+        % Console printing controls (preferred)
+        printToConsole = false     % if true, prints some log lines to Command Window
         consoleStride  = 10        % print every Nth log line (1 = print all)
+
         damping = 1.0
 
         % Safety bounds
@@ -19,8 +22,14 @@ classdef ProcessSolver < handle
         PMin    = 1
         PMax    = 1e9
 
-        % ---- NEW: captured log lines for UI ----
+        % Captured log lines for UI
         logLines string = strings(0,1)
+    end
+
+    % ---- Compatibility alias: verbose ----
+    % Allows old calls like fs.solve('verbose',true) to still work.
+    properties (Dependent)
+        verbose
     end
 
     properties (Access = private)
@@ -39,6 +48,16 @@ classdef ProcessSolver < handle
             obj.zMax = log(obj.nDotMax);
 
             obj.logLines = strings(0,1);
+        end
+
+        % --- Dependent property methods for verbose alias ---
+        function v = get.verbose(obj)
+            v = obj.printToConsole;
+        end
+
+        function set.verbose(obj, v)
+            % Treat verbose=true as "print something"
+            obj.printToConsole = logical(v);
         end
 
         function solve(obj)
@@ -143,7 +162,7 @@ classdef ProcessSolver < handle
         function log(obj, msg, varargin)
             line = string(sprintf(msg, varargin{:}));
             obj.logLines(end+1,1) = line;
-        
+
             if obj.printToConsole
                 k = numel(obj.logLines);
                 if obj.consoleStride <= 1 || mod(k, obj.consoleStride) == 0
@@ -184,8 +203,6 @@ classdef ProcessSolver < handle
         end
 
         function dx = solveLinearLM(~, J, b)
-            % Robust damped least squares (Levenberg–Marquardt):
-            % (J'J + lambda I) dx = J' b
             n = size(J,2);
             JTJ = J.' * J;
             JTb = J.' * b;
