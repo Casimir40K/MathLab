@@ -307,7 +307,7 @@ classdef MathLabApp < handle
             addRow = uigridlayout(leftG, [1 2], ...
                 'ColumnWidth',{140,'1x'}, 'Padding',[0 0 0 0]);
             app.AddUnitDropDown = uidropdown(addRow, ...
-                'Items',{'Mixer','Link','Reactor','Separator','Purge','Splitter','Recycle','Bypass','Manifold'},'Value','Mixer');
+                'Items',{'Mixer','Link','Reactor','Separator','Purge','Splitter','Recycle','Bypass','Manifold','Source','Sink','DesignSpec','Adjust','Calculator','Constraint'},'Value','Mixer');
             app.AddUnitBtn = uibutton(addRow,'push','Text','Add Unit...', ...
                 'BackgroundColor',[0.82 0.95 0.82], ...
                 'ButtonPushedFcn',@(~,~) app.addUnitFromUI());
@@ -730,8 +730,15 @@ classdef MathLabApp < handle
         function addUnitFromUI(app)
             typ = app.AddUnitDropDown.Value;
             sNames = app.getStreamNames();
-            if numel(sNames) < 2
-                uialert(app.Fig,'Need at least 2 streams.','Error'); return;
+            needsOne = ismember(typ, {'Source','Sink','DesignSpec','Constraint'});
+            if needsOne
+                if numel(sNames) < 1
+                    uialert(app.Fig,'Need at least 1 stream.','Error'); return;
+                end
+            else
+                if numel(sNames) < 2
+                    uialert(app.Fig,'Need at least 2 streams.','Error'); return;
+                end
             end
             switch typ
                 case 'Link',      app.dialogLink(sNames);
@@ -743,6 +750,12 @@ classdef MathLabApp < handle
                 case 'Recycle',   app.dialogRecycle(sNames);
                 case 'Bypass',    app.dialogBypass(sNames);
                 case 'Manifold',  app.dialogManifold(sNames);
+                case 'Source',    app.dialogSource(sNames);
+                case 'Sink',      app.dialogSink(sNames);
+                case 'DesignSpec', app.dialogDesignSpec(sNames);
+                case 'Adjust',    app.dialogAdjust(sNames);
+                case 'Calculator', app.dialogCalculator(sNames);
+                case 'Constraint', app.dialogConstraint(sNames);
             end
         end
 
@@ -760,6 +773,12 @@ classdef MathLabApp < handle
             elseif contains(cn,'Recycle'), app.dialogRecycle(sNames,idx);
             elseif contains(cn,'Bypass'), app.dialogBypass(sNames,idx);
             elseif contains(cn,'Manifold'), app.dialogManifold(sNames,idx);
+            elseif contains(cn,'Source'), app.dialogSource(sNames,idx);
+            elseif contains(cn,'Sink'), app.dialogSink(sNames,idx);
+            elseif contains(cn,'DesignSpec'), app.dialogDesignSpec(sNames,idx);
+            elseif contains(cn,'Adjust'), app.dialogAdjust(sNames,idx);
+            elseif contains(cn,'Calculator'), app.dialogCalculator(sNames,idx);
+            elseif contains(cn,'Constraint'), app.dialogConstraint(sNames,idx);
             end
         end
 
@@ -854,6 +873,18 @@ classdef MathLabApp < handle
                     for k=1:numel(u.outlets)
                         src{end+1}=uName; tgt{end+1}=char(string(u.outlets{k}.name)); elbl{end+1}=sprintf('out%d',k);
                     end
+                elseif contains(cn,'Source')
+                    src{end+1}=uName; tgt{end+1}=char(string(u.outlet.name)); elbl{end+1}='out';
+                elseif contains(cn,'Sink')
+                    src{end+1}=char(string(u.inlet.name)); tgt{end+1}=uName; elbl{end+1}='in';
+                elseif contains(cn,'DesignSpec')
+                    src{end+1}=char(string(u.stream.name)); tgt{end+1}=uName; elbl{end+1}=char(string(u.metric));
+                elseif contains(cn,'Adjust')
+                    src{end+1}=char(string(u.targetSpec.stream.name)); tgt{end+1}=uName; elbl{end+1}='spec';
+                elseif contains(cn,'Calculator')
+                    src{end+1}=uName; tgt{end+1}=uName; elbl{end+1}='calc';
+                elseif contains(cn,'Constraint')
+                    src{end+1}=uName; tgt{end+1}=uName; elbl{end+1}='=';
                 end
             end
             if isempty(src), title(ax,'No connections'); return; end
@@ -883,7 +914,13 @@ classdef MathLabApp < handle
                 'Splitter', [0.90 0.55 0.10], ...
                 'Recycle',  [0.50 0.50 0.10], ...
                 'Bypass',   [0.10 0.65 0.65], ...
-                'Manifold', [0.35 0.25 0.70]);
+                'Manifold', [0.35 0.25 0.70], ...
+                'Source',   [0.15 0.55 0.20], ...
+                'Sink',     [0.55 0.15 0.20], ...
+                'DesignSpec',[0.25 0.25 0.85], ...
+                'Adjust',   [0.55 0.20 0.65], ...
+                'Calculator',[0.20 0.55 0.55], ...
+                'Constraint',[0.55 0.55 0.20]);
             unitMarkers = struct( ...
                 'Mixer',    'h', ...  % hexagon
                 'Link',     's', ...  % square
@@ -893,7 +930,13 @@ classdef MathLabApp < handle
                 'Splitter', '>', ...
                 'Recycle',  '<', ...
                 'Bypass',   'p', ...
-                'Manifold', 'o');
+                'Manifold', 'o', ...
+                'Source',   '>', ...
+                'Sink',     '<', ...
+                'DesignSpec','d', ...
+                'Adjust',   'h', ...
+                'Calculator','p', ...
+                'Constraint','s');
             for i = 1:numel(app.units)
                 uName = sprintf('U%d:%s', i, app.shortTypeName(app.units{i}));
                 uType = app.shortTypeName(app.units{i});
@@ -1234,6 +1277,145 @@ classdef MathLabApp < handle
             end
         end
 
+
+        function dialogSource(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            ns = numel(app.speciesNames);
+            [d, ctrls] = app.makeDialog('Configure Source', 520, 240, ...
+                {{'Outlet:','dropdown',sNames}, ...
+                 {'Total flow n_dot (NaN=none):','numeric',10}, ...
+                 {sprintf('Composition y (%d vals, NaN skip):',ns),'text',num2str(nan(1,ns))}, ...
+                 {sprintf('Component flows n_i (%d vals, NaN skip):',ns),'text',num2str(nan(1,ns))}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.outlet.name));
+                ctrls{2}.Value=u.totalFlow;
+                ctrls{3}.Value=num2str(u.composition);
+                ctrls{4}.Value=num2str(u.componentFlows);
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def=struct(); def.type='Source'; def.outlet=ctrls{1}.Value;
+                def.totalFlow=ctrls{2}.Value;
+                def.composition=str2num(ctrls{3}.Value); %#ok
+                def.componentFlows=str2num(ctrls{4}.Value); %#ok
+                opts = struct('totalFlow',def.totalFlow,'composition',def.composition,'componentFlows',def.componentFlows);
+                u=proc.units.Source(app.findStream(def.outlet), opts);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogSink(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Sink', 360, 120, ...
+                {{'Inlet:','dropdown',sNames}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx}; ctrls{1}.Value=char(string(u.inlet.name));
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def=struct('type','Sink','inlet',ctrls{1}.Value);
+                u=proc.units.Sink(app.findStream(def.inlet));
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogDesignSpec(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure DesignSpec', 460, 180, ...
+                {{'Stream:','dropdown',sNames}, ...
+                 {'Metric:','dropdown',{'total_flow','comp_flow','mole_fraction'}}, ...
+                 {'Component index:','numeric',1}, ...
+                 {'Target:','numeric',0.5}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.stream.name)); ctrls{2}.Value=u.metric;
+                ctrls{3}.Value=u.componentIndex; ctrls{4}.Value=u.target;
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def=struct('type','DesignSpec','stream',ctrls{1}.Value,'metric',ctrls{2}.Value,...
+                    'componentIndex',ctrls{3}.Value,'target',ctrls{4}.Value);
+                u=proc.units.DesignSpec(app.findStream(def.stream), def.metric, def.target, def.componentIndex);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogAdjust(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Adjust', 520, 210, ...
+                {{'DesignSpec unit index:','numeric',1}, ...
+                 {'Manipulated unit index:','numeric',1}, ...
+                 {'Field name:','text','beta'}, ...
+                 {'Field index (NaN=scalar):','numeric',NaN}, ...
+                 {'Min value:','numeric',0}, ...
+                 {'Max value:','numeric',1}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{3}.Value=u.variableField; ctrls{4}.Value=u.variableIndex;
+                ctrls{5}.Value=u.minValue; ctrls{6}.Value=u.maxValue;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                dsIdx=round(ctrls{1}.Value); muIdx=round(ctrls{2}.Value);
+                if dsIdx<1||dsIdx>numel(app.units) || ~isa(app.units{dsIdx},'proc.units.DesignSpec')
+                    uialert(d,'DesignSpec index must refer to an existing DesignSpec unit.','Error'); return;
+                end
+                if muIdx<1||muIdx>numel(app.units)
+                    uialert(d,'Manipulated unit index invalid.','Error'); return;
+                end
+                def=struct('type','Adjust','designSpecIndex',dsIdx,'ownerIndex',muIdx,'field',ctrls{3}.Value,...
+                    'index',ctrls{4}.Value,'minValue',ctrls{5}.Value,'maxValue',ctrls{6}.Value);
+                u=proc.units.Adjust(app.units{dsIdx}, app.units{muIdx}, def.field, def.index, def.minValue, def.maxValue);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogCalculator(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Calculator', 620, 260, ...
+                {{'LHS stream:','dropdown',sNames},{'LHS field:','dropdown',{'n_dot','T','P'}}, ...
+                 {'A stream:','dropdown',sNames},{'A field:','dropdown',{'n_dot','T','P'}}, ...
+                 {'Operator:','dropdown',{'+' '-' '*' '/'}}, ...
+                 {'B stream:','dropdown',sNames},{'B field:','dropdown',{'n_dot','T','P'}}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.lhsOwner.name)); ctrls{2}.Value=u.lhsField;
+                ctrls{3}.Value=char(string(u.aOwner.name)); ctrls{4}.Value=u.aField;
+                ctrls{5}.Value=u.operator;
+                ctrls{6}.Value=char(string(u.bOwner.name)); ctrls{7}.Value=u.bField;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','Calculator','lhsStream',ctrls{1}.Value,'lhsField',ctrls{2}.Value,...
+                    'aStream',ctrls{3}.Value,'aField',ctrls{4}.Value,'operator',ctrls{5}.Value,...
+                    'bStream',ctrls{6}.Value,'bField',ctrls{7}.Value);
+                u=proc.units.Calculator(app.findStream(def.lhsStream),def.lhsField,...
+                    app.findStream(def.aStream),def.aField,def.operator,...
+                    app.findStream(def.bStream),def.bField);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogConstraint(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Constraint', 460, 170, ...
+                {{'Stream:','dropdown',sNames},{'Field:','dropdown',{'n_dot','T','P'}}, ...
+                 {'Value:','numeric',1},{'Index (NaN=scalar):','numeric',NaN}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.owner.name)); ctrls{2}.Value=u.field;
+                ctrls{3}.Value=u.value; ctrls{4}.Value=u.index;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','Constraint','stream',ctrls{1}.Value,'field',ctrls{2}.Value,...
+                    'value',ctrls{3}.Value,'index',ctrls{4}.Value);
+                u=proc.units.Constraint(app.findStream(def.stream),def.field,def.value,def.index);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
         function dialogRecycle(app, sNames, editIdx)
             if nargin<3, editIdx=[]; end
             [d, ctrls] = app.makeDialog('Configure Recycle', 400, 140, ...
@@ -1563,6 +1745,42 @@ classdef MathLabApp < handle
                         outS{end+1} = s; %#ok
                     end
                     u = proc.units.Manifold(inS, outS, def.route);
+                case 'Source'
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sOut)
+                        opts = struct();
+                        if isfield(def,'totalFlow'), opts.totalFlow = def.totalFlow; end
+                        if isfield(def,'composition'), opts.composition = def.composition; end
+                        if isfield(def,'componentFlows'), opts.componentFlows = def.componentFlows; end
+                        u = proc.units.Source(sOut, opts);
+                    end
+                case 'Sink'
+                    sIn = app.findStream(def.inlet);
+                    if ~isempty(sIn), u = proc.units.Sink(sIn); end
+                case 'DesignSpec'
+                    s = app.findStream(def.stream);
+                    if ~isempty(s)
+                        u = proc.units.DesignSpec(s, def.metric, def.target, def.componentIndex);
+                    end
+                case 'Adjust'
+                    if isfield(def,'designSpecIndex') && isfield(def,'ownerIndex') && ...
+                            def.designSpecIndex <= numel(app.units) && def.ownerIndex <= numel(app.units)
+                        ds = app.units{def.designSpecIndex};
+                        owner = app.units{def.ownerIndex};
+                        u = proc.units.Adjust(ds, owner, def.field, def.index, def.minValue, def.maxValue);
+                    end
+                case 'Calculator'
+                    lhs = app.findStream(def.lhsStream);
+                    a = app.findStream(def.aStream);
+                    b = app.findStream(def.bStream);
+                    if ~isempty(lhs) && ~isempty(a) && ~isempty(b)
+                        u = proc.units.Calculator(lhs, def.lhsField, a, def.aField, def.operator, b, def.bField);
+                    end
+                case 'Constraint'
+                    s = app.findStream(def.stream);
+                    if ~isempty(s)
+                        u = proc.units.Constraint(s, def.field, def.value, def.index);
+                    end
             end
         end
 
@@ -1644,6 +1862,21 @@ classdef MathLabApp < handle
                             outStr = strjoin(cellfun(@(n) n, def.outlets, 'Uni',false), ', ');
                             fprintf(fid, 'fs.addUnit(proc.units.Manifold({%s}, {%s}, %s));\n', ...
                                 inStr, outStr, mat2str(def.route));
+                        case 'Source'
+                            fprintf(fid, 'srcOpts = struct(''totalFlow'', %.6g, ''composition'', %s, ''componentFlows'', %s);\n', ...
+                                def.totalFlow, mat2str(def.composition,6), mat2str(def.componentFlows,6));
+                            fprintf(fid, 'fs.addUnit(proc.units.Source(%s, srcOpts));\n', def.outlet);
+                        case 'Sink'
+                            fprintf(fid, 'fs.addUnit(proc.units.Sink(%s));\n', def.inlet);
+                        case 'DesignSpec'
+                            fprintf(fid, 'fs.addUnit(proc.units.DesignSpec(%s, ''%s'', %.6g, %d));\n', ...
+                                def.stream, def.metric, def.target, def.componentIndex);
+                        case 'Calculator'
+                            fprintf(fid, 'fs.addUnit(proc.units.Calculator(%s, ''%s'', %s, ''%s'', ''%s'', %s, ''%s''));\n', ...
+                                def.lhsStream, def.lhsField, def.aStream, def.aField, def.operator, def.bStream, def.bField);
+                        case 'Constraint'
+                            fprintf(fid, 'fs.addUnit(proc.units.Constraint(%s, ''%s'', %.6g, %.6g));\n', ...
+                                def.stream, def.field, def.value, def.index);
                     end
                 end
             end
