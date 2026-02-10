@@ -1,2 +1,155 @@
-# MathLab
-MathLab: a Breaking Bad™ Parody Solver
+# MathLab — MATLAB Steady-State Process Solver
+
+A transparent, educational process simulator built in MATLAB. Simpler than Aspen/HYSYS by design — explicit physics, readable code, no black boxes.
+
+## Quick Start
+
+### Folder Structure
+
+```
+MathLab/
+├── MathLabApp.m            ← the GUI (run this)
+├── run_case_water.m        ← command-line demo
+└── +proc/                  ← package folder (+ is required)
+    ├── Stream.m
+    ├── Flowsheet.m
+    ├── ProcessSolver.m
+    └── +units/
+        ├── Link.m
+        ├── Mixer.m
+        ├── Reactor.m
+        ├── Separator.m
+        └── Purge.m
+```
+
+The `+proc` prefix is mandatory MATLAB package syntax. Don't rename it.
+
+### Run the GUI
+
+```matlab
+cd('path/to/MathLab')
+app = MathLabApp;
+```
+
+### Run the Command-Line Demo
+
+```matlab
+cd('path/to/MathLab')
+run_case_water
+```
+
+---
+
+## App Tabs
+
+### 1. Species
+
+Editable table with columns **Name** and **MW (kg/kmol)**. Add, remove, or edit species directly in the table. Click **Apply Species** to lock them in — this resets all streams and units, since composition vectors depend on the species list.
+
+You can start from the defaults (H2, O2, H2O) or define your own system from scratch.
+
+### 2. Streams
+
+Two tables stacked vertically:
+
+**Top table (Values):** Edit n_dot, T, P, and mole fractions for each stream. Double-click a cell, type a value, press Enter.
+
+**Bottom table (Known Flags):** Checkboxes. Checked = you are specifying this value (it's a process input). Unchecked = the solver will calculate it. Your feed stream(s) should have everything checked. Internal streams need only reasonable initial guesses.
+
+Add/remove streams at the bottom. Stream names auto-increment.
+
+### 3. Units & Flowsheet
+
+**Left panel:** Add unit operations from the dropdown. Each opens a configuration dialog where you pick streams by name and set parameters. You can reconfigure or remove units at any time.
+
+**Right panel:** A process flow diagram that updates whenever you add/change/remove units. Blue squares = unit operations, orange circles = streams, arrows = flow direction with stream names as labels.
+
+### 4. Solve
+
+Set max iterations and tolerance, then click **Solve**. The tab shows:
+
+- **DOF indicator:** Green if square (unknowns = equations), amber if under-constrained, red if over-constrained.
+- **Convergence plot:** Log-scale residual norm vs iteration, with tolerance line shown. This is your main diagnostic — a healthy solve shows a smooth drop to below the tolerance line.
+- **Solver log:** Full text output from the solver.
+
+### 5. Results
+
+Complete stream table with all solved values: names, n_dot, T, P, and mole fractions.
+
+### 6. Sensitivity
+
+Sweep any unit parameter or stream property across a range and see how an output changes:
+
+1. Pick what to sweep (reactor conversion, purge beta, separator phi, stream n_dot/T/P)
+2. Pick the target unit or stream
+3. Set min, max, and number of points
+4. Pick which output stream and field to monitor
+5. Click **Run Sensitivity**
+
+The app re-solves the entire flowsheet for each point and plots the result. Points that fail to converge show as gaps.
+
+---
+
+## Key Concepts
+
+### Known vs Unknown
+Every stream variable is either **known** (fixed input) or **unknown** (solved). Feed streams should be fully known. The solver uses Levenberg-Marquardt with finite-difference Jacobians, log-transformed flow rates, and softmax-transformed compositions.
+
+### DOF (Degrees of Freedom)
+Aim for unknowns = equations. Under-constrained means you need more specifications. The solver may still work when slightly non-square (LM is least-squares), but square is ideal.
+
+### Reactions
+Defined by species indices, stoichiometric coefficients, and a single-pass conversion:
+- **Reactant indices**: consumed species (1-indexed)
+- **Product indices**: produced species
+- **Stoich vector**: negative for reactants, positive for products, length = number of species
+- **Conversion**: fraction of limiting reactant consumed (0 to 1)
+
+Example: `2H₂ + O₂ → 2H₂O` with species `{H2, O2, H2O}`:
+reactants = `[1 2]`, products = `[3]`, stoich = `[-2 -1 2]`
+
+---
+
+## Adding Custom Unit Operations
+
+Create `+proc/+units/YourUnit.m`:
+
+```matlab
+classdef YourUnit < handle
+    properties
+        inlet; outlet;
+        % your parameters
+    end
+    methods
+        function obj = YourUnit(inlet, outlet, ...)
+            obj.inlet = inlet; obj.outlet = outlet;
+        end
+        function eqs = equations(obj)
+            eqs = [];
+            % Residuals — each should be zero when satisfied
+            eqs(end+1) = obj.outlet.n_dot - obj.inlet.n_dot;
+        end
+        function str = describe(obj)
+            str = sprintf('YourUnit: %s -> %s', string(obj.inlet.name), string(obj.outlet.name));
+        end
+        function names = streamNames(obj)
+            names = {char(string(obj.inlet.name)), char(string(obj.outlet.name))};
+        end
+    end
+end
+```
+
+For the GUI to support your custom unit, add a dialog method in MathLabApp.m and add it to the dropdown. For command-line use, just instantiate it directly and add to the flowsheet.
+
+---
+
+## Troubleshooting
+
+| Problem | Likely Cause / Fix |
+|---------|-------------------|
+| y must sum to 1 | Mole fraction guesses don't add up — normalize them |
+| Initial residual NaN/Inf | A stream has zero or negative n_dot/T/P |
+| Doesn't converge | Poor initial guesses — try values closer to expected solution |
+| DOF not square | Need more known specs, or a missing/extra unit |
+| Line search failed | The problem may be too stiff — try smaller conversion or check connections |
+| Stream not found in dialog | Create the stream first on the Streams tab |
