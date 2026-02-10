@@ -29,7 +29,7 @@ end
 S1.setKnown('n_dot', 10);
 S1.setKnown('T', 300);
 S1.setKnown('P', 1e5);
-S1.setKnown('y', [0.8 0.2 0]);
+S1.setKnown('y', [2/3 1/3 0]);
 
 % ---- Initial guesses (NOT known) ----
 S2.setGuess(12, [0.75 0.20 0.05]);
