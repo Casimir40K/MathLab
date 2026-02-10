@@ -165,6 +165,50 @@ function u = buildUnitFromDef(def, streams)
             if ~isempty(sIn) && ~isempty(sRec) && ~isempty(sPur)
                 u = proc.units.Purge(sIn, sRec, sPur, def.beta);
             end
+        case 'Splitter'
+            sIn = findS(def.inlet, streams);
+            outS = {};
+            for k = 1:numel(def.outlets)
+                s = findS(def.outlets{k}, streams);
+                if isempty(s), return; end
+                outS{end+1} = s; %#ok
+            end
+            if ~isempty(sIn)
+                if isfield(def, 'splitFractions')
+                    u = proc.units.Splitter(sIn, outS, 'fractions', def.splitFractions);
+                else
+                    u = proc.units.Splitter(sIn, outS, 'flows', def.specifiedOutletFlows);
+                end
+            end
+        case 'Recycle'
+            sSrc = findS(def.source, streams);
+            sTear = findS(def.tear, streams);
+            if ~isempty(sSrc) && ~isempty(sTear)
+                u = proc.units.Recycle(sSrc, sTear);
+            end
+        case 'Bypass'
+            sIn = findS(def.inlet, streams);
+            sProcIn = findS(def.processInlet, streams);
+            sByp = findS(def.bypassStream, streams);
+            sRet = findS(def.processReturn, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sProcIn) && ~isempty(sByp) && ~isempty(sRet) && ~isempty(sOut)
+                u = proc.units.Bypass(sIn, sProcIn, sByp, sRet, sOut, def.bypassFraction);
+            end
+        case 'Manifold'
+            inS = {};
+            for k = 1:numel(def.inlets)
+                s = findS(def.inlets{k}, streams);
+                if isempty(s), return; end
+                inS{end+1} = s; %#ok
+            end
+            outS = {};
+            for k = 1:numel(def.outlets)
+                s = findS(def.outlets{k}, streams);
+                if isempty(s), return; end
+                outS{end+1} = s; %#ok
+            end
+            u = proc.units.Manifold(inS, outS, def.route);
     end
 end
 

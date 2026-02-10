@@ -307,7 +307,7 @@ classdef MathLabApp < handle
             addRow = uigridlayout(leftG, [1 2], ...
                 'ColumnWidth',{140,'1x'}, 'Padding',[0 0 0 0]);
             app.AddUnitDropDown = uidropdown(addRow, ...
-                'Items',{'Mixer','Link','Reactor','Separator','Purge'},'Value','Mixer');
+                'Items',{'Mixer','Link','Reactor','Separator','Purge','Splitter','Recycle','Bypass','Manifold'},'Value','Mixer');
             app.AddUnitBtn = uibutton(addRow,'push','Text','Add Unit...', ...
                 'BackgroundColor',[0.82 0.95 0.82], ...
                 'ButtonPushedFcn',@(~,~) app.addUnitFromUI());
@@ -739,6 +739,10 @@ classdef MathLabApp < handle
                 case 'Reactor',   app.dialogReactor(sNames);
                 case 'Separator', app.dialogSeparator(sNames);
                 case 'Purge',     app.dialogPurge(sNames);
+                case 'Splitter',  app.dialogSplitter(sNames);
+                case 'Recycle',   app.dialogRecycle(sNames);
+                case 'Bypass',    app.dialogBypass(sNames);
+                case 'Manifold',  app.dialogManifold(sNames);
             end
         end
 
@@ -752,6 +756,10 @@ classdef MathLabApp < handle
             elseif contains(cn,'Reactor'), app.dialogReactor(sNames,idx);
             elseif contains(cn,'Separator'), app.dialogSeparator(sNames,idx);
             elseif contains(cn,'Purge'), app.dialogPurge(sNames,idx);
+            elseif contains(cn,'Splitter'), app.dialogSplitter(sNames,idx);
+            elseif contains(cn,'Recycle'), app.dialogRecycle(sNames,idx);
+            elseif contains(cn,'Bypass'), app.dialogBypass(sNames,idx);
+            elseif contains(cn,'Manifold'), app.dialogManifold(sNames,idx);
             end
         end
 
@@ -825,6 +833,27 @@ classdef MathLabApp < handle
                     src{end+1}=char(string(u.inlet.name)); tgt{end+1}=uName; elbl{end+1}='';
                     src{end+1}=uName; tgt{end+1}=char(string(u.recycle.name)); elbl{end+1}='rec';
                     src{end+1}=uName; tgt{end+1}=char(string(u.purge.name)); elbl{end+1}='pur';
+                elseif contains(cn,'Splitter')
+                    src{end+1}=char(string(u.inlet.name)); tgt{end+1}=uName; elbl{end+1}='';
+                    for k=1:numel(u.outlets)
+                        src{end+1}=uName; tgt{end+1}=char(string(u.outlets{k}.name)); elbl{end+1}=sprintf('out%d',k);
+                    end
+                elseif contains(cn,'Recycle')
+                    src{end+1}=char(string(u.source.name)); tgt{end+1}=uName; elbl{end+1}='src';
+                    src{end+1}=uName; tgt{end+1}=char(string(u.tear.name)); elbl{end+1}='tear';
+                elseif contains(cn,'Bypass')
+                    src{end+1}=char(string(u.inlet.name)); tgt{end+1}=uName; elbl{end+1}='';
+                    src{end+1}=uName; tgt{end+1}=char(string(u.processInlet.name)); elbl{end+1}='proc in';
+                    src{end+1}=uName; tgt{end+1}=char(string(u.bypassStream.name)); elbl{end+1}='bypass';
+                    src{end+1}=char(string(u.processReturn.name)); tgt{end+1}=uName; elbl{end+1}='proc ret';
+                    src{end+1}=uName; tgt{end+1}=char(string(u.outlet.name)); elbl{end+1}='out';
+                elseif contains(cn,'Manifold')
+                    for k=1:numel(u.inlets)
+                        src{end+1}=char(string(u.inlets{k}.name)); tgt{end+1}=uName; elbl{end+1}=sprintf('in%d',k);
+                    end
+                    for k=1:numel(u.outlets)
+                        src{end+1}=uName; tgt{end+1}=char(string(u.outlets{k}.name)); elbl{end+1}=sprintf('out%d',k);
+                    end
                 end
             end
             if isempty(src), title(ax,'No connections'); return; end
@@ -850,13 +879,21 @@ classdef MathLabApp < handle
                 'Link',     [0.40 0.40 0.40], ...
                 'Reactor',  [0.85 0.20 0.20], ...
                 'Separator',[0.10 0.40 0.80], ...
-                'Purge',    [0.70 0.40 0.80]);
+                'Purge',    [0.70 0.40 0.80], ...
+                'Splitter', [0.90 0.55 0.10], ...
+                'Recycle',  [0.50 0.50 0.10], ...
+                'Bypass',   [0.10 0.65 0.65], ...
+                'Manifold', [0.35 0.25 0.70]);
             unitMarkers = struct( ...
                 'Mixer',    'h', ...  % hexagon
                 'Link',     's', ...  % square
                 'Reactor',  'd', ...  % diamond
                 'Separator','^', ...  % triangle up
-                'Purge',    'v');     % triangle down
+                'Purge',    'v', ...     % triangle down
+                'Splitter', '>', ...
+                'Recycle',  '<', ...
+                'Bypass',   'p', ...
+                'Manifold', 'o');
             for i = 1:numel(app.units)
                 uName = sprintf('U%d:%s', i, app.shortTypeName(app.units{i}));
                 uType = app.shortTypeName(app.units{i});
@@ -1150,6 +1187,141 @@ classdef MathLabApp < handle
     % =====================================================================
     methods (Access = private)
 
+
+        function dialogSplitter(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Splitter', 520, 220, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlets (comma-sep):','text',strjoin(sNames(1:min(2,end)),', ')}, ...
+                 {'Mode (fractions/flows):','text','fractions'}, ...
+                 {'Values:','text','0.5 0.5'}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                outN=cellfun(@(s)char(string(s.name)),u.outlets,'Uni',false);
+                ctrls{2}.Value=strjoin(outN,', ');
+                if ~isempty(u.splitFractions)
+                    ctrls{3}.Value='fractions';
+                    ctrls{4}.Value=num2str(u.splitFractions);
+                else
+                    ctrls{3}.Value='flows';
+                    ctrls{4}.Value=num2str(u.specifiedOutletFlows);
+                end
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                outNms=strtrim(strsplit(ctrls{2}.Value,','));
+                outS={};
+                for k=1:numel(outNms)
+                    s=app.findStream(outNms{k});
+                    if isempty(s), uialert(d,sprintf('"%s" not found.',outNms{k}),'Error'); return; end
+                    outS{end+1}=s; %#ok
+                end
+                vals=str2num(ctrls{4}.Value); %#ok
+                if numel(vals)~=numel(outS)
+                    uialert(d,'Values length must match number of outlets.','Error'); return;
+                end
+                mode=lower(strtrim(ctrls{3}.Value));
+                def.type='Splitter'; def.inlet=ctrls{1}.Value; def.outlets=outNms;
+                if strcmp(mode,'fractions')
+                    def.splitFractions=vals;
+                    u=proc.units.Splitter(app.findStream(def.inlet),outS,'fractions',vals);
+                else
+                    def.specifiedOutletFlows=vals;
+                    u=proc.units.Splitter(app.findStream(def.inlet),outS,'flows',vals);
+                end
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogRecycle(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Recycle', 400, 140, ...
+                {{'Source stream:','dropdown',sNames}, {'Tear stream:','dropdown',sNames}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.source.name));
+                ctrls{2}.Value=char(string(u.tear.name));
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def.type='Recycle'; def.source=ctrls{1}.Value; def.tear=ctrls{2}.Value;
+                u=proc.units.Recycle(app.findStream(def.source), app.findStream(def.tear));
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogBypass(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Bypass', 520, 260, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Process inlet stream:','dropdown',sNames}, ...
+                 {'Bypass stream:','dropdown',sNames}, ...
+                 {'Process return stream:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Bypass fraction (0..1):','numeric',0.2}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.processInlet.name));
+                ctrls{3}.Value=char(string(u.bypassStream.name));
+                ctrls{4}.Value=char(string(u.processReturn.name));
+                ctrls{5}.Value=char(string(u.outlet.name));
+                ctrls{6}.Value=u.bypassFraction;
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def.type='Bypass';
+                def.inlet=ctrls{1}.Value; def.processInlet=ctrls{2}.Value;
+                def.bypassStream=ctrls{3}.Value; def.processReturn=ctrls{4}.Value;
+                def.outlet=ctrls{5}.Value; def.bypassFraction=ctrls{6}.Value;
+                u=proc.units.Bypass(app.findStream(def.inlet), app.findStream(def.processInlet), ...
+                    app.findStream(def.bypassStream), app.findStream(def.processReturn), ...
+                    app.findStream(def.outlet), def.bypassFraction);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogManifold(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Manifold', 520, 220, ...
+                {{'Inlets (comma-sep):','text',strjoin(sNames(1:min(2,end)),', ')}, ...
+                 {'Outlets (comma-sep):','text',strjoin(sNames(1:min(2,end)),', ')}, ...
+                 {'Route vector:','text','1 2'}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                inN=cellfun(@(s)char(string(s.name)),u.inlets,'Uni',false);
+                outN=cellfun(@(s)char(string(s.name)),u.outlets,'Uni',false);
+                ctrls{1}.Value=strjoin(inN,', ');
+                ctrls{2}.Value=strjoin(outN,', ');
+                ctrls{3}.Value=num2str(u.route);
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                inNms=strtrim(strsplit(ctrls{1}.Value,','));
+                outNms=strtrim(strsplit(ctrls{2}.Value,','));
+                route=str2num(ctrls{3}.Value); %#ok
+                if numel(route)~=numel(outNms)
+                    uialert(d,'Route length must equal number of outlets.','Error'); return;
+                end
+                inS={}; outS={};
+                for k=1:numel(inNms)
+                    s=app.findStream(inNms{k}); if isempty(s), uialert(d,sprintf('"%s" not found.',inNms{k}),'Error'); return; end
+                    inS{end+1}=s; %#ok
+                end
+                for k=1:numel(outNms)
+                    s=app.findStream(outNms{k}); if isempty(s), uialert(d,sprintf('"%s" not found.',outNms{k}),'Error'); return; end
+                    outS{end+1}=s; %#ok
+                end
+                if any(route < 1) || any(route > numel(inS))
+                    uialert(d,'Route indices must reference inlet list.','Error'); return;
+                end
+                def.type='Manifold'; def.inlets=inNms; def.outlets=outNms; def.route=route;
+                u=proc.units.Manifold(inS,outS,route);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
         function saveConfigDialog(app)
             [file, path] = uiputfile('*.mat', 'Save Config', 'mathlab_config.mat');
             if isequal(file, 0), return; end
@@ -1347,6 +1519,50 @@ classdef MathLabApp < handle
                     if ~isempty(sIn) && ~isempty(sRec) && ~isempty(sPur)
                         u = proc.units.Purge(sIn, sRec, sPur, def.beta);
                     end
+                case 'Splitter'
+                    sIn = app.findStream(def.inlet);
+                    outS = {};
+                    for k = 1:numel(def.outlets)
+                        s = app.findStream(def.outlets{k});
+                        if isempty(s), return; end
+                        outS{end+1} = s; %#ok
+                    end
+                    if ~isempty(sIn)
+                        if isfield(def, 'splitFractions')
+                            u = proc.units.Splitter(sIn, outS, 'fractions', def.splitFractions);
+                        else
+                            u = proc.units.Splitter(sIn, outS, 'flows', def.specifiedOutletFlows);
+                        end
+                    end
+                case 'Recycle'
+                    sSrc = app.findStream(def.source);
+                    sTear = app.findStream(def.tear);
+                    if ~isempty(sSrc) && ~isempty(sTear)
+                        u = proc.units.Recycle(sSrc, sTear);
+                    end
+                case 'Bypass'
+                    sIn = app.findStream(def.inlet);
+                    sProcIn = app.findStream(def.processInlet);
+                    sByp = app.findStream(def.bypassStream);
+                    sRet = app.findStream(def.processReturn);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sProcIn) && ~isempty(sByp) && ~isempty(sRet) && ~isempty(sOut)
+                        u = proc.units.Bypass(sIn, sProcIn, sByp, sRet, sOut, def.bypassFraction);
+                    end
+                case 'Manifold'
+                    inS = {};
+                    for k = 1:numel(def.inlets)
+                        s = app.findStream(def.inlets{k});
+                        if isempty(s), return; end
+                        inS{end+1} = s; %#ok
+                    end
+                    outS = {};
+                    for k = 1:numel(def.outlets)
+                        s = app.findStream(def.outlets{k});
+                        if isempty(s), return; end
+                        outS{end+1} = s; %#ok
+                    end
+                    u = proc.units.Manifold(inS, outS, def.route);
             end
         end
 
@@ -1409,6 +1625,25 @@ classdef MathLabApp < handle
                         case 'Purge'
                             fprintf(fid, 'fs.addUnit(proc.units.Purge(%s, %s, %s, %.4g));\n', ...
                                 def.inlet, def.recycle, def.purge, def.beta);
+                        case 'Splitter'
+                            outStr = strjoin(cellfun(@(n) n, def.outlets, 'Uni',false), ', ');
+                            if isfield(def, 'splitFractions')
+                                fprintf(fid, 'fs.addUnit(proc.units.Splitter(%s, {%s}, ''fractions'', %s));\n', ...
+                                    def.inlet, outStr, mat2str(def.splitFractions,6));
+                            else
+                                fprintf(fid, 'fs.addUnit(proc.units.Splitter(%s, {%s}, ''flows'', %s));\n', ...
+                                    def.inlet, outStr, mat2str(def.specifiedOutletFlows,6));
+                            end
+                        case 'Recycle'
+                            fprintf(fid, 'fs.addUnit(proc.units.Recycle(%s, %s));\n', def.source, def.tear);
+                        case 'Bypass'
+                            fprintf(fid, 'fs.addUnit(proc.units.Bypass(%s, %s, %s, %s, %s, %.4g));\n', ...
+                                def.inlet, def.processInlet, def.bypassStream, def.processReturn, def.outlet, def.bypassFraction);
+                        case 'Manifold'
+                            inStr = strjoin(cellfun(@(n) n, def.inlets, 'Uni',false), ', ');
+                            outStr = strjoin(cellfun(@(n) n, def.outlets, 'Uni',false), ', ');
+                            fprintf(fid, 'fs.addUnit(proc.units.Manifold({%s}, {%s}, %s));\n', ...
+                                inStr, outStr, mat2str(def.route));
                     end
                 end
             end
