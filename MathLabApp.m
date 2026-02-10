@@ -69,6 +69,13 @@ classdef MathLabApp < handle
         SensOutputFieldDD
         SensRunBtn
         SensAxes
+        SensMaxIterField
+        SensTolField
+        SensStatusLabel
+
+        % -- Project & Output --
+        ProjectTitleField
+        SaveResultsBtn
     end
 
     % =====================================================================
@@ -83,6 +90,7 @@ classdef MathLabApp < handle
         unitDefs cell = {}    % serializable unit definitions for save/load
         lastSolver = []
         lastFlowsheet = []
+        projectTitle char = 'MathLab_Project'
     end
 
     % =====================================================================
@@ -142,8 +150,8 @@ classdef MathLabApp < handle
 
             % --- Left: species editor + save/load ---
             leftP = uipanel(gl, 'Title','Species & Properties', 'FontWeight','bold');
-            leftG = uigridlayout(leftP, [5 1], ...
-                'RowHeight',{'1x', 30, 30, 36, 36}, 'Padding',[8 8 8 8], 'RowSpacing',4);
+            leftG = uigridlayout(leftP, [7 1], ...
+                'RowHeight',{'1x', 30, 30, 36, 30, 36, 36}, 'Padding',[8 8 8 8], 'RowSpacing',4);
 
             app.SpeciesTable = uitable(leftG, 'ColumnEditable',[true true], ...
                 'ColumnName', {'Name','MW (kg/kmol)'}, ...
@@ -165,17 +173,33 @@ classdef MathLabApp < handle
                 'FontWeight','bold', 'BackgroundColor',[0.82 0.90 1.0], ...
                 'ButtonPushedFcn',@(~,~) app.applySpecies());
 
+            % Project title row
+            titleRow = uigridlayout(leftG, [1 2], 'ColumnWidth',{110,'1x'}, ...
+                'Padding',[0 0 0 0]);
+            uilabel(titleRow,'Text','Project title:','FontWeight','bold');
+            app.ProjectTitleField = uieditfield(titleRow,'text', ...
+                'Value',app.projectTitle, ...
+                'ValueChangedFcn',@(src,~) app.onProjectTitleChanged(src));
+
             % Save / Load row
             slRow = uigridlayout(leftG, [1 2], 'ColumnWidth',{'1x','1x'}, ...
                 'Padding',[0 0 0 0]);
-            app.SaveConfigBtn = uibutton(slRow,'push','Text','Save Config...', ...
+            app.SaveConfigBtn = uibutton(slRow,'push','Text','Save Config', ...
                 'Icon','', 'FontWeight','bold', ...
                 'BackgroundColor',[0.92 0.95 0.85], ...
-                'ButtonPushedFcn',@(~,~) app.saveConfigDialog());
+                'ButtonPushedFcn',@(~,~) app.saveConfigToOutput());
             app.LoadConfigBtn = uibutton(slRow,'push','Text','Load Config...', ...
                 'FontWeight','bold', ...
                 'BackgroundColor',[0.95 0.92 0.85], ...
                 'ButtonPushedFcn',@(~,~) app.loadConfigDialog());
+
+            % Save results row
+            resRow = uigridlayout(leftG, [1 1], 'ColumnWidth',{'1x'}, ...
+                'Padding',[0 0 0 0]);
+            app.SaveResultsBtn = uibutton(resRow,'push','Text','Save Results', ...
+                'FontWeight','bold', ...
+                'BackgroundColor',[0.85 0.92 0.95], ...
+                'ButtonPushedFcn',@(~,~) app.saveResultsToOutput());
 
             % --- Right: instructions ---
             rightP = uipanel(gl, 'Title','How to Use MathLab', 'FontWeight','bold');
@@ -378,15 +402,15 @@ classdef MathLabApp < handle
         function buildSensitivityTab(app)
             t = uitab(app.Tabs, 'Title', ' Sensitivity ');
             app.SensTab = t;
-            gl = uigridlayout(t, [2 1], 'RowHeight',{110,'1x'}, ...
+            gl = uigridlayout(t, [2 1], 'RowHeight',{190,'1x'}, ...
                 'Padding',[12 12 12 12], 'RowSpacing',8);
 
-            % Top: controls in a 3-row, 4-col grid
+            % Top: controls in a 5-row, 4-col grid
             topP = uipanel(gl, 'Title','Setup', 'FontWeight','bold');
             topP.Layout.Row = 1;
-            topG = uigridlayout(topP, [3 4], ...
-                'ColumnWidth', {110, '1x', 110, '1x'}, ...
-                'RowHeight', {26, 26, 26}, ...
+            topG = uigridlayout(topP, [5 4], ...
+                'ColumnWidth', {130, '1x', 130, '1x'}, ...
+                'RowHeight', {26, 26, 26, 26, 26}, ...
                 'Padding', [8 8 8 8], 'RowSpacing', 4, 'ColumnSpacing', 8);
 
             % Row 1
@@ -397,7 +421,8 @@ classdef MathLabApp < handle
                 'Value','Reactor conversion', ...
                 'ValueChangedFcn',@(~,~) app.onSensParamChanged());
             uilabel(topG,'Text','Target unit/stream:','FontWeight','bold');
-            app.SensUnitDropDown = uidropdown(topG,'Items',{'(none)'},'Value','(none)');
+            app.SensUnitDropDown = uidropdown(topG,'Items',{'(none)'},'Value','(none)', ...
+                'ValueChangedFcn',@(~,~) app.validateSensSelection());
 
             % Row 2
             uilabel(topG,'Text','Min / Max / Pts:','FontWeight','bold');
@@ -414,6 +439,21 @@ classdef MathLabApp < handle
             uilabel(topG,'Text','Output field:','FontWeight','bold');
             app.SensOutputFieldDD = uidropdown(topG, ...
                 'Items',{'n_dot','T','P','y(1)','y(2)','y(3)'},'Value','n_dot');
+            uilabel(topG,'Text','');
+            uilabel(topG,'Text','');
+
+            % Row 4: solver parameters
+            uilabel(topG,'Text','Max iterations:','FontWeight','bold');
+            app.SensMaxIterField = uieditfield(topG,'numeric','Value',300, ...
+                'Limits',[1 100000],'RoundFractionalValues','on');
+            uilabel(topG,'Text','Tolerance (abs):','FontWeight','bold');
+            app.SensTolField = uieditfield(topG,'numeric','Value',1e-8, ...
+                'Limits',[1e-15 1]);
+
+            % Row 5: status + run button
+            app.SensStatusLabel = uilabel(topG,'Text','', ...
+                'FontColor',[0.5 0.5 0.5],'FontAngle','italic');
+            app.SensStatusLabel.Layout.Column = [1 2];
             uilabel(topG,'Text','');
             app.SensRunBtn = uibutton(topG,'push','Text','Run Sensitivity', ...
                 'FontWeight','bold','BackgroundColor',[0.25 0.50 0.80],'FontColor','w', ...
@@ -803,7 +843,32 @@ classdef MathLabApp < handle
                 'EdgeLabel',elbl,'NodeColor',nc,'MarkerSize',ms, ...
                 'NodeFontSize',9,'EdgeFontSize',8,'ArrowSize',10, ...
                 'LineWidth',1.5,'NodeFontWeight','bold');
-            highlight(h, find(startsWith(nNames,'U')), 'Marker','s');
+
+            % Distinct markers and colors per unit type
+            unitColors = struct( ...
+                'Mixer',    [0.20 0.60 0.30], ...
+                'Link',     [0.40 0.40 0.40], ...
+                'Reactor',  [0.85 0.20 0.20], ...
+                'Separator',[0.10 0.40 0.80], ...
+                'Purge',    [0.70 0.40 0.80]);
+            unitMarkers = struct( ...
+                'Mixer',    'h', ...  % hexagon
+                'Link',     's', ...  % square
+                'Reactor',  'd', ...  % diamond
+                'Separator','^', ...  % triangle up
+                'Purge',    'v');     % triangle down
+            for i = 1:numel(app.units)
+                uName = sprintf('U%d:%s', i, app.shortTypeName(app.units{i}));
+                uType = app.shortTypeName(app.units{i});
+                nodeIdx = find(strcmp(nNames, uName));
+                if ~isempty(nodeIdx) && isfield(unitMarkers, uType)
+                    highlight(h, nodeIdx, ...
+                        'Marker', unitMarkers.(uType), ...
+                        'NodeColor', unitColors.(uType), ...
+                        'MarkerSize', 16);
+                end
+            end
+
             title(ax,'Process Flow Diagram');
             ax.XTick=[]; ax.YTick=[];
         end
@@ -1071,9 +1136,11 @@ classdef MathLabApp < handle
 
             catch ME
                 title(app.ResidualAxes, 'FAILED');
-                app.LogArea.Value = [{'SOLVE FAILED:'; ME.message; ''}; ...
+                logLines = [{'SOLVE FAILED:'; ME.message; ''}; ...
                     arrayfun(@(f) sprintf('  %s (line %d)',f.name,f.line), ME.stack,'Uni',false)];
-                app.setStatus('Solve failed — see log.');
+                app.LogArea.Value = logLines;
+                app.writeErrorLog('solve_error', logLines);
+                app.setStatus('Solve failed — see log (saved to output/logs).');
             end
         end
     end
@@ -1090,6 +1157,41 @@ classdef MathLabApp < handle
             app.syncStreamsFromTable();
             app.saveConfig(filepath);
             app.setStatus(sprintf('Config saved to %s', filepath));
+        end
+
+        function saveConfigToOutput(app)
+            app.syncStreamsFromTable();
+            outDir = app.ensureOutputDir('saves');
+            fname = app.autoFileName('config', 'mat');
+            filepath = fullfile(outDir, fname);
+            app.saveConfig(filepath);
+            app.setStatus(sprintf('Config saved to %s', filepath));
+        end
+
+        function saveResultsToOutput(app)
+            if isempty(app.lastSolver)
+                uialert(app.Fig,'No solver results yet. Run the solver first.','No Results');
+                return;
+            end
+            outDir = app.ensureOutputDir('results');
+            fname = app.autoFileName('results', 'mat');
+            filepath = fullfile(outDir, fname);
+            solverData = app.lastSolver; %#ok
+            if ~isempty(app.lastFlowsheet)
+                streamTable = app.lastFlowsheet.streamTable(); %#ok
+                save(filepath, 'solverData', 'streamTable');
+            else
+                save(filepath, 'solverData');
+            end
+            app.setStatus(sprintf('Results saved to %s', filepath));
+        end
+
+        function onProjectTitleChanged(app, src)
+            app.projectTitle = strtrim(src.Value);
+            if isempty(app.projectTitle)
+                app.projectTitle = 'MathLab_Project';
+                src.Value = app.projectTitle;
+            end
         end
 
         function loadConfigDialog(app)
@@ -1130,6 +1232,9 @@ classdef MathLabApp < handle
             % Solver settings
             cfg.maxIter = app.MaxIterField.Value;
             cfg.tolAbs  = app.TolField.Value;
+
+            % Project title
+            cfg.projectTitle = app.projectTitle;
 
             save(filepath, '-struct', 'cfg');
 
@@ -1179,6 +1284,12 @@ classdef MathLabApp < handle
             % Restore solver settings
             if isfield(cfg,'maxIter'), app.MaxIterField.Value = cfg.maxIter; end
             if isfield(cfg,'tolAbs'),  app.TolField.Value = cfg.tolAbs; end
+
+            % Restore project title
+            if isfield(cfg,'projectTitle')
+                app.projectTitle = cfg.projectTitle;
+                app.ProjectTitleField.Value = cfg.projectTitle;
+            end
 
             app.refreshStreamTables();
             app.refreshUnitsListBox();
@@ -1348,6 +1459,45 @@ classdef MathLabApp < handle
                 if isempty(uNames), uNames = {'(none)'}; end
                 app.SensUnitDropDown.Items = uNames;
             end
+            app.validateSensSelection();
+        end
+
+        function validateSensSelection(app)
+            % Grey out run button if sweep param is impossible for selected target
+            paramChoice = app.SensParamDropDown.Value;
+            unitSel = app.SensUnitDropDown.Value;
+
+            if strcmp(unitSel, '(none)')
+                app.SensRunBtn.Enable = 'off';
+                app.SensStatusLabel.Text = 'Select a valid target unit/stream.';
+                return;
+            end
+
+            % Check if param matches unit type
+            tok = regexp(unitSel,'^\[(\d+)\]','tokens');
+            if ~isempty(tok)
+                idx = str2double(tok{1}{1});
+                if idx >= 1 && idx <= numel(app.units)
+                    uType = app.shortTypeName(app.units{idx});
+                    impossible = false;
+                    if contains(paramChoice, 'conversion') && ~strcmp(uType, 'Reactor')
+                        impossible = true;
+                    elseif contains(paramChoice, 'beta') && ~strcmp(uType, 'Purge')
+                        impossible = true;
+                    elseif contains(paramChoice, 'phi') && ~strcmp(uType, 'Separator')
+                        impossible = true;
+                    end
+                    if impossible
+                        app.SensRunBtn.Enable = 'off';
+                        app.SensStatusLabel.Text = sprintf('"%s" not applicable to %s.', ...
+                            paramChoice, uType);
+                        return;
+                    end
+                end
+            end
+
+            app.SensRunBtn.Enable = 'on';
+            app.SensStatusLabel.Text = '';
         end
 
         function runSensitivity(app)
@@ -1362,6 +1512,8 @@ classdef MathLabApp < handle
             nPts = round(app.SensNptsField.Value);
             outStreamName = app.SensOutputStreamDD.Value;
             outFieldStr   = app.SensOutputFieldDD.Value;
+            sensMaxIt = app.SensMaxIterField.Value;
+            sensTol   = app.SensTolField.Value;
 
             vals = linspace(vMin, vMax, nPts);
             results = nan(1, nPts);
@@ -1375,22 +1527,28 @@ classdef MathLabApp < handle
 
             cla(app.SensAxes);
             app.setStatus('Running sensitivity...');
+            app.SensStatusLabel.Text = sprintf('Running 0/%d ...', nPts);
+            app.SensRunBtn.Enable = 'off';
             drawnow;
 
             for p = 1:nPts
                 try
                     app.applySensParam(paramChoice, unitIdx, vals(p), unitSel);
                     fs = app.buildFlowsheet();
-                    fs.solve('maxIter',300,'tolAbs',1e-8,'printToConsole',false);
+                    fs.solve('maxIter',sensMaxIt,'tolAbs',sensTol,'printToConsole',false);
                     results(p) = app.extractOutput(outStreamName, outFieldStr);
                 catch
                     results(p) = NaN;
                 end
+                app.SensStatusLabel.Text = sprintf('Running %d/%d ...', p, nPts);
+                drawnow limitrate;
             end
 
             if ~isnan(origVal)
                 app.applySensParam(paramChoice, unitIdx, origVal, unitSel);
             end
+
+            app.SensRunBtn.Enable = 'on';
 
             plot(app.SensAxes, vals, results, '-o', 'LineWidth',1.5, ...
                 'MarkerSize',5, 'Color',[0.2 0.5 0.8]);
@@ -1398,7 +1556,11 @@ classdef MathLabApp < handle
             ylabel(app.SensAxes, sprintf('%s . %s', outStreamName, strrep(outFieldStr,'_','\_')));
             title(app.SensAxes, 'Sensitivity Analysis');
             grid(app.SensAxes, 'on');
-            app.setStatus(sprintf('Sensitivity: %d/%d converged.', sum(~isnan(results)), nPts));
+            nConv = sum(~isnan(results));
+            statusMsg = sprintf('Sensitivity: %d/%d converged (maxIter=%d, tol=%.1e).', ...
+                nConv, nPts, sensMaxIt, sensTol);
+            app.SensStatusLabel.Text = statusMsg;
+            app.setStatus(statusMsg);
         end
 
         function applySensParam(app, paramChoice, unitIdx, val, unitSel)
@@ -1480,6 +1642,45 @@ classdef MathLabApp < handle
 
         function setStatus(app, msg)
             app.StatusBar.Text = ['  ' msg];
+        end
+    end
+
+    % =====================================================================
+    %  OUTPUT FOLDER MANAGEMENT
+    % =====================================================================
+    methods (Access = private)
+        function dirPath = ensureOutputDir(~, subfolder)
+            % Ensure output/<subfolder> exists and return the path
+            baseDir = fullfile(pwd, 'output');
+            dirPath = fullfile(baseDir, subfolder);
+            if ~exist(dirPath, 'dir')
+                mkdir(dirPath);
+            end
+        end
+
+        function fname = autoFileName(app, prefix, ext)
+            % Generate filename: <ProjectTitle>_<prefix>_YYYYMMDD_HHMMSS.<ext>
+            safeTitle = regexprep(app.projectTitle, '[^A-Za-z0-9_-]', '_');
+            stamp = datestr(now, 'yyyymmdd_HHMMSS'); %#ok
+            fname = sprintf('%s_%s_%s.%s', safeTitle, prefix, stamp, ext);
+        end
+
+        function writeErrorLog(app, prefix, logLines)
+            % Write error log to output/logs
+            try
+                logDir = app.ensureOutputDir('logs');
+                fname = app.autoFileName(prefix, 'txt');
+                fpath = fullfile(logDir, fname);
+                fid = fopen(fpath, 'w');
+                if fid >= 0
+                    for k = 1:numel(logLines)
+                        fprintf(fid, '%s\n', logLines{k});
+                    end
+                    fclose(fid);
+                end
+            catch
+                % Silently ignore logging failures
+            end
         end
     end
 end
