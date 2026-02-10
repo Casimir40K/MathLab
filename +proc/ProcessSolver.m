@@ -8,6 +8,20 @@ classdef ProcessSolver < handle
         tolAbs  = 1e-9
         fdEps   = 1e-7
 
+        % Jacobian controls
+        kFD = 6
+        enableBroyden logical = true
+        broydenMinStepNorm2 = 1e-20
+        broydenMinRcond = 1e-14
+
+        % Optional high-level settings bundle; fields matching solver
+        % properties are applied at solve() start.
+        solverSettings struct = struct()
+
+        % Remove unit-level normalization residuals when y is already
+        % constrained by softmax parameterization in unpackUnknowns().
+        removeRedundantNormalizationConstraints logical = true
+
         printToConsole = false
         consoleStride  = 10
 
@@ -28,6 +42,9 @@ classdef ProcessSolver < handle
         residualHistory double = []
         stepHistory     double = []
         alphaHistory    double = []
+
+        % Runtime counter (including line-search and FD probes)
+        residualEvalCount double = 0
 
         % Optional callback: called each iteration as iterCallback(iter, rNorm)
         % Set this before calling solve() to get real-time updates.
@@ -58,10 +75,20 @@ classdef ProcessSolver < handle
         function set.verbose(obj, v),  obj.printToConsole = logical(v); end
 
         function solve(obj)
+            obj.applySolverSettingsStruct();
+
             obj.logLines = strings(0,1);
             obj.residualHistory = [];
             obj.stepHistory     = [];
             obj.alphaHistory    = [];
+            obj.residualEvalCount = 0;
+
+            nDisabled = obj.configureNormalizationConstraints();
+            if obj.removeRedundantNormalizationConstraints
+                obj.log('Normalization constraints disabled on %d unit(s) (y uses softmax parameterization).', nDisabled);
+            else
+                obj.log('Normalization constraints kept on all units.');
+            end
 
             [x, obj.map] = obj.packUnknowns();
 
@@ -83,23 +110,29 @@ classdef ProcessSolver < handle
             % Fire callback for initial state
             obj.fireCallback(0, r0);
 
-            for k = 1:obj.maxIter
-                [r, ok] = obj.tryResiduals(x);
-                if ~ok
-                    error('Residual became NaN/Inf at iteration %d.', k);
-                end
+            J = [];
+            forceFD = true;
 
+            for k = 1:obj.maxIter
                 rn = norm(r);
                 if rn < obj.tolAbs
                     obj.residualHistory(end+1) = rn;
                     obj.stepHistory(end+1)     = 0;
                     obj.alphaHistory(end+1)    = 0;
-                    obj.log('Converged at iter %d: ||r||=%.6e', k, rn);
+                    obj.log('Converged at iter %d: ||r||=%.6e (resEvals=%d)', k, rn, obj.residualEvalCount);
                     obj.fireCallback(k, rn);
                     break
                 end
 
-                J  = obj.fdJacobianSafe(x, r);
+                doFD = forceFD || isempty(J) || mod(k-1, max(1,obj.kFD)) == 0;
+                if doFD
+                    J  = obj.fdJacobianSafe(x, r);
+                    jacobianMode = "FD";
+                    forceFD = false;
+                else
+                    jacobianMode = "REUSE";
+                end
+
                 dx = obj.solveLinearLM(J, -r);
 
                 if any(~isfinite(dx))
@@ -108,14 +141,38 @@ classdef ProcessSolver < handle
 
                 alpha = obj.damping;
                 bt = 0;
+                accepted = false;
                 while bt < 30
                     x_new = x + alpha*dx;
                     [r_new, okNew] = obj.tryResiduals(x_new);
-                    if okNew && norm(r_new) <= rn, break; end
+                    if okNew && norm(r_new) <= rn
+                        accepted = true;
+                        break;
+                    end
                     alpha = alpha * 0.5;
                     bt = bt + 1;
                     if alpha < 1e-10
-                        error('Line search failed at iteration %d.', k);
+                        break;
+                    end
+                end
+                if ~accepted
+                    error('Line search failed at iteration %d.', k);
+                end
+
+                % Accepted step
+                s = x_new - x;
+                rPrev = r;
+                x = x_new;
+                r = r_new;
+
+                % Update Jacobian after accepted step
+                if obj.enableBroyden
+                    [J, broydenAccepted] = obj.tryBroydenUpdate(J, s, r - rPrev);
+                    if broydenAccepted
+                        jacobianMode = jacobianMode + "+BROYDEN";
+                    else
+                        forceFD = true;
+                        jacobianMode = jacobianMode + "+BROYDEN-SKIP";
                     end
                 end
 
@@ -124,20 +181,19 @@ classdef ProcessSolver < handle
                 obj.stepHistory(end+1)     = norm(dx);
                 obj.alphaHistory(end+1)    = alpha;
 
-                obj.log('Iter %3d: ||r||=%.4e  ||dx||=%.3e  alpha=%.3e  bt=%d', ...
-                    k, rn, norm(dx), alpha, bt);
+                relRn = rn / max(r0, eps);
+                obj.log('Iter %3d: ||r||=%.4e (rel=%.3e)  ||dx||=%.3e  alpha=%.3e  bt=%d  J=%s', ...
+                    k, rn, relRn, norm(dx), alpha, bt, jacobianMode);
 
                 % Fire callback for real-time plotting
                 obj.fireCallback(k, rn);
 
-                x = x + alpha*dx;
-
                 if k == obj.maxIter
-                    finalR = norm(obj.tryResiduals(x));
+                    finalR = norm(r);
                     obj.residualHistory(end+1) = finalR;
                     obj.stepHistory(end+1) = NaN;
                     obj.alphaHistory(end+1) = NaN;
-                    obj.log('Max iterations reached. Final ||r||=%.6e', finalR);
+                    obj.log('Max iterations reached. Final ||r||=%.6e (resEvals=%d)', finalR, obj.residualEvalCount);
                     obj.fireCallback(k+1, finalR);
                     warning('Max iterations reached. Final ||r||=%.6e', finalR);
                 end
@@ -168,6 +224,58 @@ classdef ProcessSolver < handle
     end
 
     methods (Access = private)
+        function applySolverSettingsStruct(obj)
+            if isempty(obj.solverSettings) || ~isstruct(obj.solverSettings)
+                return
+            end
+            fn = fieldnames(obj.solverSettings);
+            for i = 1:numel(fn)
+                if isprop(obj, fn{i})
+                    obj.(fn{i}) = obj.solverSettings.(fn{i});
+                end
+            end
+        end
+
+        function nDisabled = configureNormalizationConstraints(obj)
+            nDisabled = 0;
+            for u = 1:numel(obj.units)
+                unit = obj.units{u};
+                if isprop(unit, 'includeNormalizationConstraints')
+                    unit.includeNormalizationConstraints = ~obj.removeRedundantNormalizationConstraints;
+                    if obj.removeRedundantNormalizationConstraints
+                        nDisabled = nDisabled + 1;
+                    end
+                end
+            end
+        end
+
+        function [J, accepted] = tryBroydenUpdate(obj, J, s, y)
+            accepted = false;
+            s2 = s.' * s;
+            if ~(isfinite(s2) && s2 > obj.broydenMinStepNorm2)
+                return
+            end
+
+            Js = J * s;
+            u = (y - Js) / s2;
+            Jcand = J + u * s.';
+
+            if any(~isfinite(Jcand(:)))
+                return
+            end
+
+            n = size(Jcand,2);
+            JTJ = Jcand.' * Jcand;
+            lambda = 1e-12 * max(1, trace(JTJ) / max(1,n));
+            rc = rcond(JTJ + lambda * eye(n));
+            if ~isfinite(rc) || rc < obj.broydenMinRcond
+                return
+            end
+
+            J = Jcand;
+            accepted = true;
+        end
+
         function fireCallback(obj, iter, rNorm)
             if ~isempty(obj.iterCallback) && isa(obj.iterCallback, 'function_handle')
                 try
@@ -190,6 +298,7 @@ classdef ProcessSolver < handle
         end
 
         function [r, ok] = tryResiduals(obj, x)
+            obj.residualEvalCount = obj.residualEvalCount + 1;
             obj.unpackUnknowns(x);
             r = [];
             for u = 1:numel(obj.units)

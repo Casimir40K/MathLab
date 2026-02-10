@@ -4,6 +4,7 @@ classdef Separator < handle
         outletA    % Stream object (e.g. gas / recycle)
         outletB    % Stream object (e.g. liquid / product)
         phi        % split fraction to outletA for each species (0..1), size = nspecies
+        includeNormalizationConstraints logical = true
     end
 
     methods
@@ -26,9 +27,11 @@ classdef Separator < handle
                           - (1 - obj.phi(i)) * obj.inlet.n_dot * obj.inlet.y(i);
             end
 
-            % Mole fraction sum constraints
-            eqs(end+1) = sum(obj.outletA.y) - 1;
-            eqs(end+1) = sum(obj.outletB.y) - 1;
+            % Mole fraction sum constraints (optional; can be redundant if y is parameterized)
+            if obj.includeNormalizationConstraints
+                eqs(end+1) = sum(obj.outletA.y) - 1;
+                eqs(end+1) = sum(obj.outletB.y) - 1;
+            end
 
             % T/P pass-through
             eqs(end+1) = obj.outletA.T - obj.inlet.T;
