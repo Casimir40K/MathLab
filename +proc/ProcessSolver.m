@@ -140,24 +140,20 @@ classdef ProcessSolver < handle
                     error('dx contains NaN/Inf. Model may be ill-conditioned.');
                 end
 
-                alpha = obj.damping;
-                bt = 0;
-                accepted = false;
-                while bt < 30
-                    x_new = x + alpha*dx;
-                    [r_new, okNew] = obj.tryResiduals(x_new);
-                    if okNew && norm(r_new) <= rn
-                        accepted = true;
-                        break;
-                    end
-                    alpha = alpha * 0.5;
-                    bt = bt + 1;
-                    if alpha < 1e-10
-                        break;
-                    end
-                end
+                [accepted, x_new, r_new, alpha, bt] = obj.backtrackingLineSearch(x, dx, rn);
                 if ~accepted
-                    error('Line search failed at iteration %d.', k);
+                    % Fallback: discard reused/Broyden Jacobian and retry with
+                    % a fresh finite-difference Jacobian at the current state.
+                    J  = obj.fdJacobianSafe(x, r);
+                    jacobianMode = "FD-RETRY";
+                    forceFD = false;
+
+                    dx = obj.solveLinearLM(J, -r);
+                    [accepted, x_new, r_new, alpha, bt] = obj.backtrackingLineSearch(x, dx, rn);
+
+                    if ~accepted
+                        error('Line search failed at iteration %d.', k);
+                    end
                 end
 
                 % Accepted step
@@ -321,6 +317,30 @@ classdef ProcessSolver < handle
                 [r2, ok] = obj.tryResiduals(x2);
                 if ~ok, J(:,k) = 0;
                 else,   J(:,k) = (r2 - r0) / step;
+                end
+            end
+        end
+
+        function [accepted, x_new, r_new, alpha, bt] = backtrackingLineSearch(obj, x, dx, rn)
+            alpha = obj.damping;
+            bt = 0;
+            accepted = false;
+            x_new = x;
+            r_new = nan(size(dx));
+
+            while bt < 30
+                xCand = x + alpha*dx;
+                [rCand, okCand] = obj.tryResiduals(xCand);
+                if okCand && norm(rCand) <= rn
+                    accepted = true;
+                    x_new = xCand;
+                    r_new = rCand;
+                    return
+                end
+                alpha = alpha * 0.5;
+                bt = bt + 1;
+                if alpha < 1e-10
+                    break;
                 end
             end
         end
