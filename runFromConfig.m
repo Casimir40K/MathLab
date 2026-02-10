@@ -238,6 +238,42 @@ function u = buildUnitFromDef(def, streams)
                 outS{end+1} = s; %#ok
             end
             u = proc.units.Manifold(inS, outS, def.route);
+        case 'Source'
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sOut)
+                opts = struct();
+                if isfield(def,'totalFlow'), opts.totalFlow = def.totalFlow; end
+                if isfield(def,'composition'), opts.composition = def.composition; end
+                if isfield(def,'componentFlows'), opts.componentFlows = def.componentFlows; end
+                u = proc.units.Source(sOut, opts);
+            end
+        case 'Sink'
+            sIn = findS(def.inlet, streams);
+            if ~isempty(sIn), u = proc.units.Sink(sIn); end
+        case 'DesignSpec'
+            s = findS(def.stream, streams);
+            if ~isempty(s)
+                u = proc.units.DesignSpec(s, def.metric, def.target, def.componentIndex);
+            end
+        case 'Adjust'
+            if isfield(def,'designSpecIndex') && isfield(def,'ownerIndex') && ...
+                    def.designSpecIndex <= numel(units) && def.ownerIndex <= numel(units)
+                ds = units{def.designSpecIndex};
+                owner = units{def.ownerIndex};
+                u = proc.units.Adjust(ds, owner, def.field, def.index, def.minValue, def.maxValue);
+            end
+        case 'Calculator'
+            lhs = findS(def.lhsStream, streams);
+            a = findS(def.aStream, streams);
+            b = findS(def.bStream, streams);
+            if ~isempty(lhs) && ~isempty(a) && ~isempty(b)
+                u = proc.units.Calculator(lhs, def.lhsField, a, def.aField, def.operator, b, def.bField);
+            end
+        case 'Constraint'
+            s = findS(def.stream, streams);
+            if ~isempty(s)
+                u = proc.units.Constraint(s, def.field, def.value, def.index);
+            end
     end
 end
 

@@ -95,6 +95,11 @@ The app re-solves the entire flowsheet for each point and plots the result. Poin
 ---
 
 
+## Available Unit Operations
+
+- Material/path units: `Link`, `Mixer`, `Splitter`, `Separator`, `Purge`, `Recycle`, `Bypass`, `Manifold`, `Reactor`
+- Specification / solver-control blocks: `Source`, `Sink`, `DesignSpec`, `Adjust`, `Calculator`, `Constraint`
+
 ### Hidden Solver Debug Logging
 
 Solver debug output is **off by default**. You can enable it only from code or environment variables:

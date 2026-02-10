@@ -479,13 +479,13 @@ classdef ProcessSolver < handle
         end
 
         function [x, map] = packUnknowns(obj)
-            x = []; map = struct('streamIndex',{},'var',{},'subIndex',{});
+            x = []; map = struct('streamIndex',{},'var',{},'subIndex',{},'unitIndex',{},'bounds',{},'owner',{},'field',{});
             for si = 1:numel(obj.streams)
                 s = obj.streams{si};
                 if obj.isUnknownScalar(s,'n_dot')
                     nd = obj.safeInit(s.n_dot,1.0);
                     x(end+1,1) = log(max(nd,obj.nDotMin));
-                    map(end+1) = struct('streamIndex',si,'var','z','subIndex',[]);
+                    map(end+1) = struct('streamIndex',si,'var','z','subIndex',[], 'unitIndex',NaN,'bounds',[-Inf Inf],'owner',[],'field','');
                 end
                 if obj.anyYUnknown(s)
                     y0 = s.y;
@@ -494,20 +494,47 @@ classdef ProcessSolver < handle
                     a0 = log(max(y0,1e-12));
                     for j = 1:obj.ns
                         x(end+1,1) = a0(j);
-                        map(end+1) = struct('streamIndex',si,'var','a','subIndex',j);
+                        map(end+1) = struct('streamIndex',si,'var','a','subIndex',j, 'unitIndex',NaN,'bounds',[-Inf Inf],'owner',[],'field','');
                     end
                 end
                 knownT = isprop(s,'known')&&isstruct(s.known)&&isfield(s.known,'T')&&...
                     islogical(s.known.T)&&isscalar(s.known.T)&&s.known.T;
                 if ~knownT
                     x(end+1,1) = obj.safeInit(s.T,300);
-                    map(end+1) = struct('streamIndex',si,'var','T','subIndex',[]);
+                    map(end+1) = struct('streamIndex',si,'var','T','subIndex',[], 'unitIndex',NaN,'bounds',[-Inf Inf],'owner',[],'field','');
                 end
                 knownP = isprop(s,'known')&&isstruct(s.known)&&isfield(s.known,'P')&&...
                     islogical(s.known.P)&&isscalar(s.known.P)&&s.known.P;
                 if ~knownP
                     x(end+1,1) = obj.safeInit(s.P,1e5);
-                    map(end+1) = struct('streamIndex',si,'var','P','subIndex',[]);
+                    map(end+1) = struct('streamIndex',si,'var','P','subIndex',[], 'unitIndex',NaN,'bounds',[-Inf Inf],'owner',[],'field','');
+                end
+            end
+
+            % Optional unit-level manipulated unknowns (e.g., Adjust blocks)
+            for ui = 1:numel(obj.units)
+                u = obj.units{ui};
+                if ~ismethod(u, 'unknownSpecs')
+                    continue;
+                end
+                specs = u.unknownSpecs();
+                if isempty(specs)
+                    continue;
+                end
+                if ~isstruct(specs)
+                    error('unknownSpecs() for %s must return a struct array.', class(u));
+                end
+                for k = 1:numel(specs)
+                    s = specs(k);
+                    x(end+1,1) = obj.safeInit(s.initial, 0); %#ok<AGROW>
+                    map(end+1) = struct( ...
+                        'streamIndex', NaN, ...
+                        'var', 'u', ...
+                        'subIndex', obj.structFieldOr(s, 'index', NaN), ...
+                        'unitIndex', ui, ...
+                        'bounds', [obj.structFieldOr(s, 'lower', -Inf), obj.structFieldOr(s, 'upper', Inf)], ...
+                        'owner', s.owner, ...
+                        'field', s.field); %#ok<GFLD>
                 end
             end
         end
@@ -522,6 +549,20 @@ classdef ProcessSolver < handle
                     case 'a', a(si,sub) = x(k);
                     case 'T', obj.streams{si}.T = x(k);
                     case 'P', obj.streams{si}.P = x(k);
+                    case 'u'
+                        xi = min(max(x(k), obj.map(k).bounds(1)), obj.map(k).bounds(2));
+                        owner = obj.map(k).owner;
+                        field = obj.map(k).field;
+                        if ~isprop(owner, field)
+                            error('Unknown manipulated field "%s" on %s.', field, class(owner));
+                        end
+                        if isnan(sub)
+                            owner.(field) = xi;
+                        else
+                            arr = owner.(field);
+                            arr(sub) = xi;
+                            owner.(field) = arr;
+                        end
                 end
             end
             for si = 1:numel(obj.streams)
@@ -534,6 +575,15 @@ classdef ProcessSolver < handle
                 end
                 if ~isnan(s.T), s.T = min(max(s.T,obj.TMin),obj.TMax); end
                 if ~isnan(s.P), s.P = min(max(s.P,obj.PMin),obj.PMax); end
+            end
+        end
+
+
+        function v = structFieldOr(~, s, fieldName, defaultValue)
+            if isfield(s, fieldName)
+                v = s.(fieldName);
+            else
+                v = defaultValue;
             end
         end
 
