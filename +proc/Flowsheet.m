@@ -146,6 +146,18 @@ classdef Flowsheet < handle
                 end
             end
 
+
+            % Unit-level manipulated unknowns (e.g., Adjust blocks)
+            for ui = 1:numel(obj.units)
+                unit = obj.units{ui};
+                if ismethod(unit, 'unknownSpecs')
+                    specs = unit.unknownSpecs();
+                    if ~isempty(specs)
+                        n = n + numel(specs);
+                    end
+                end
+            end
+
             function tf = isUnknownField(st, fieldName)
                 if isprop(st,'known') && isstruct(st.known) && isfield(st.known, fieldName)
                     tf = ~st.known.(fieldName);
@@ -250,9 +262,6 @@ classdef Flowsheet < handle
                 end
 
                 ru = unit.equations();
-                if isempty(ru)
-                    error('Unit #%d (%s): equations() returned empty.', u, class(unit));
-                end
                 if any(~isfinite(ru(:)))
                     error('Unit #%d (%s): equations() returned NaN/Inf. Check connectivity/initial guesses.', u, class(unit));
                 end
