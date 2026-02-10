@@ -24,10 +24,14 @@ classdef ProcessSolver < handle
         % Captured log lines for UI
         logLines string = strings(0,1)
 
-        % === Convergence history (populated after solve) ===
-        residualHistory double = []   % ||r|| at each iteration
-        stepHistory     double = []   % ||dx|| at each iteration
-        alphaHistory    double = []   % line search step size
+        % Convergence history (populated during solve)
+        residualHistory double = []
+        stepHistory     double = []
+        alphaHistory    double = []
+
+        % Optional callback: called each iteration as iterCallback(iter, rNorm)
+        % Set this before calling solve() to get real-time updates.
+        iterCallback = []   % function_handle or empty
     end
 
     properties (Dependent)
@@ -76,6 +80,9 @@ classdef ProcessSolver < handle
 
             obj.log('Initial ||r|| = %.6e (unknowns=%d, eqs=%d)', r0, numel(x), numel(r));
 
+            % Fire callback for initial state
+            obj.fireCallback(0, r0);
+
             for k = 1:obj.maxIter
                 [r, ok] = obj.tryResiduals(x);
                 if ~ok
@@ -88,6 +95,7 @@ classdef ProcessSolver < handle
                     obj.stepHistory(end+1)     = 0;
                     obj.alphaHistory(end+1)    = 0;
                     obj.log('Converged at iter %d: ||r||=%.6e', k, rn);
+                    obj.fireCallback(k, rn);
                     break
                 end
 
@@ -119,6 +127,9 @@ classdef ProcessSolver < handle
                 obj.log('Iter %3d: ||r||=%.4e  ||dx||=%.3e  alpha=%.3e  bt=%d', ...
                     k, rn, norm(dx), alpha, bt);
 
+                % Fire callback for real-time plotting
+                obj.fireCallback(k, rn);
+
                 x = x + alpha*dx;
 
                 if k == obj.maxIter
@@ -127,6 +138,7 @@ classdef ProcessSolver < handle
                     obj.stepHistory(end+1) = NaN;
                     obj.alphaHistory(end+1) = NaN;
                     obj.log('Max iterations reached. Final ||r||=%.6e', finalR);
+                    obj.fireCallback(k+1, finalR);
                     warning('Max iterations reached. Final ||r||=%.6e', finalR);
                 end
             end
@@ -156,6 +168,16 @@ classdef ProcessSolver < handle
     end
 
     methods (Access = private)
+        function fireCallback(obj, iter, rNorm)
+            if ~isempty(obj.iterCallback) && isa(obj.iterCallback, 'function_handle')
+                try
+                    obj.iterCallback(iter, rNorm);
+                catch
+                    % Don't let a callback crash the solver
+                end
+            end
+        end
+
         function log(obj, msg, varargin)
             line = string(sprintf(msg, varargin{:}));
             obj.logLines(end+1,1) = line;

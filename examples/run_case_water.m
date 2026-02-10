@@ -65,7 +65,7 @@ end
 fprintf('DOF: unknowns=%d, equations=%d\n\n', nU, nE);
 
 % ---- Solve ----
-solver = fs.solve('maxIter', 2000, 'tolAbs', 1e-9, 'verbose', true);
+solver = fs.solve('maxIter', 200, 'tolAbs', 1e-9, 'verbose', true);
 
 % ---- Results ----
 fprintf('\n=== Stream Table ===\n');
