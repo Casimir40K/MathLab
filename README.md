@@ -18,6 +18,10 @@ MathLab/
         ├── Link.m
         ├── Mixer.m
         ├── Reactor.m
+        ├── StoichiometricReactor.m
+        ├── ConversionReactor.m
+        ├── YieldReactor.m
+        ├── EquilibriumReactor.m
         ├── Separator.m
         └── Purge.m
 ```
@@ -130,6 +134,12 @@ Defined by species indices, stoichiometric coefficients, and a single-pass conve
 
 Example: `2H₂ + O₂ → 2H₂O` with species `{H2, O2, H2O}`:
 reactants = `[1 2]`, products = `[3]`, stoich = `[-2 -1 2]`
+
+Mass-only reactor variants are also available:
+- `StoichiometricReactor` (extent-based: `n_out = n_in + nu*xi`)
+- `ConversionReactor` (limiting-reactant conversion -> extent)
+- `YieldReactor` (basis-reactant conversion + product yields)
+- `EquilibriumReactor` (single-reaction ideal mass-action equilibrium)
 
 ---
 

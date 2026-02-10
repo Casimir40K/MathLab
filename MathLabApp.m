@@ -307,7 +307,7 @@ classdef MathLabApp < handle
             addRow = uigridlayout(leftG, [1 2], ...
                 'ColumnWidth',{140,'1x'}, 'Padding',[0 0 0 0]);
             app.AddUnitDropDown = uidropdown(addRow, ...
-                'Items',{'Mixer','Link','Reactor','Separator','Purge','Splitter','Recycle','Bypass','Manifold'},'Value','Mixer');
+                'Items',{'Mixer','Link','Reactor','StoichiometricReactor','ConversionReactor','YieldReactor','EquilibriumReactor','Separator','Purge','Splitter','Recycle','Bypass','Manifold'},'Value','Mixer');
             app.AddUnitBtn = uibutton(addRow,'push','Text','Add Unit...', ...
                 'BackgroundColor',[0.82 0.95 0.82], ...
                 'ButtonPushedFcn',@(~,~) app.addUnitFromUI());
@@ -737,6 +737,10 @@ classdef MathLabApp < handle
                 case 'Link',      app.dialogLink(sNames);
                 case 'Mixer',     app.dialogMixer(sNames);
                 case 'Reactor',   app.dialogReactor(sNames);
+                case 'StoichiometricReactor', app.dialogStoichiometricReactor(sNames);
+                case 'ConversionReactor', app.dialogConversionReactor(sNames);
+                case 'YieldReactor', app.dialogYieldReactor(sNames);
+                case 'EquilibriumReactor', app.dialogEquilibriumReactor(sNames);
                 case 'Separator', app.dialogSeparator(sNames);
                 case 'Purge',     app.dialogPurge(sNames);
                 case 'Splitter',  app.dialogSplitter(sNames);
@@ -753,6 +757,10 @@ classdef MathLabApp < handle
             cn = class(app.units{idx});
             if contains(cn,'Link'),      app.dialogLink(sNames,idx);
             elseif contains(cn,'Mixer'), app.dialogMixer(sNames,idx);
+            elseif contains(cn,'StoichiometricReactor'), app.dialogStoichiometricReactor(sNames,idx);
+            elseif contains(cn,'ConversionReactor'), app.dialogConversionReactor(sNames,idx);
+            elseif contains(cn,'YieldReactor'), app.dialogYieldReactor(sNames,idx);
+            elseif contains(cn,'EquilibriumReactor'), app.dialogEquilibriumReactor(sNames,idx);
             elseif contains(cn,'Reactor'), app.dialogReactor(sNames,idx);
             elseif contains(cn,'Separator'), app.dialogSeparator(sNames,idx);
             elseif contains(cn,'Purge'), app.dialogPurge(sNames,idx);
@@ -878,6 +886,10 @@ classdef MathLabApp < handle
                 'Mixer',    [0.20 0.60 0.30], ...
                 'Link',     [0.40 0.40 0.40], ...
                 'Reactor',  [0.85 0.20 0.20], ...
+                'StoichiometricReactor', [0.85 0.20 0.20], ...
+                'ConversionReactor', [0.85 0.20 0.20], ...
+                'YieldReactor', [0.85 0.20 0.20], ...
+                'EquilibriumReactor', [0.85 0.20 0.20], ...
                 'Separator',[0.10 0.40 0.80], ...
                 'Purge',    [0.70 0.40 0.80], ...
                 'Splitter', [0.90 0.55 0.10], ...
@@ -888,6 +900,10 @@ classdef MathLabApp < handle
                 'Mixer',    'h', ...  % hexagon
                 'Link',     's', ...  % square
                 'Reactor',  'd', ...  % diamond
+                'StoichiometricReactor', 'd', ...
+                'ConversionReactor', 'd', ...
+                'YieldReactor', 'd', ...
+                'EquilibriumReactor', 'd', ...
                 'Separator','^', ...  % triangle up
                 'Purge',    'v', ...     % triangle down
                 'Splitter', '>', ...
@@ -1015,6 +1031,151 @@ classdef MathLabApp < handle
                 def.conversion=efConv.Value; def.reactions=rxn;
                 u=proc.units.Reactor(app.findStream(def.inlet),...
                     app.findStream(def.outlet),rxn,efConv.Value);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogStoichiometricReactor(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            ns = numel(app.speciesNames);
+            [d, ctrls] = app.makeDialog('Configure StoichiometricReactor', 520, 240, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Nu vector:','text',num2str(zeros(1,ns))}, ...
+                 {'Extent mode (fixed/solve):','text','fixed'}, ...
+                 {'Extent (if fixed):','numeric',0}, ...
+                 {'Reference species index:','numeric',1}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=num2str(u.nu.');
+                ctrls{4}.Value=u.extentMode;
+                ctrls{5}.Value=u.extent;
+                ctrls{6}.Value=u.referenceSpecies;
+            elseif numel(sNames)>=2
+                ctrls{2}.Value=sNames{2};
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                nu = str2num(ctrls{3}.Value); %#ok
+                if numel(nu) ~= ns
+                    uialert(d,sprintf('Nu vector must have %d entries.',ns),'Error'); return;
+                end
+                def.type='StoichiometricReactor'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
+                def.nu=nu; def.extentMode=strtrim(lower(ctrls{4}.Value));
+                def.extent=ctrls{5}.Value; def.referenceSpecies=ctrls{6}.Value;
+                u=proc.units.StoichiometricReactor(app.findStream(def.inlet), app.findStream(def.outlet), def.nu, ...
+                    'extent', def.extent, 'extentMode', def.extentMode, 'referenceSpecies', def.referenceSpecies);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogConversionReactor(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            ns = numel(app.speciesNames);
+            [d, ctrls] = app.makeDialog('Configure ConversionReactor', 520, 240, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Nu vector:','text',num2str(zeros(1,ns))}, ...
+                 {'Key species index:','numeric',1}, ...
+                 {'Conversion mode (fixed/solve):','text','fixed'}, ...
+                 {'Conversion X (if fixed):','numeric',0.5}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=num2str(u.nu.');
+                ctrls{4}.Value=u.keySpecies;
+                ctrls{5}.Value=u.conversionMode;
+                ctrls{6}.Value=u.conversion;
+            elseif numel(sNames)>=2
+                ctrls{2}.Value=sNames{2};
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                nu = str2num(ctrls{3}.Value); %#ok
+                if numel(nu) ~= ns
+                    uialert(d,sprintf('Nu vector must have %d entries.',ns),'Error'); return;
+                end
+                def.type='ConversionReactor'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
+                def.nu=nu; def.keySpecies=ctrls{4}.Value;
+                def.conversionMode=strtrim(lower(ctrls{5}.Value)); def.conversion=ctrls{6}.Value;
+                u=proc.units.ConversionReactor(app.findStream(def.inlet), app.findStream(def.outlet), def.nu, ...
+                    def.keySpecies, def.conversion, 'conversionMode', def.conversionMode);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogYieldReactor(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure YieldReactor', 540, 250, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Basis species index (A):','numeric',1}, ...
+                 {'Conversion mode (fixed/solve):','text','fixed'}, ...
+                 {'Conversion X (if fixed):','numeric',0.5}, ...
+                 {'Product species indices:','text','2'}, ...
+                 {'Product yields:','text','1'}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=u.basisSpecies;
+                ctrls{4}.Value=u.conversionMode;
+                ctrls{5}.Value=u.conversion;
+                ctrls{6}.Value=num2str(u.productSpecies(:).');
+                ctrls{7}.Value=num2str(u.productYields(:).');
+            elseif numel(sNames)>=2
+                ctrls{2}.Value=sNames{2};
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                pIdx = str2num(ctrls{6}.Value); %#ok
+                pY = str2num(ctrls{7}.Value); %#ok
+                if numel(pIdx) ~= numel(pY)
+                    uialert(d,'Product indices and yields must have same length.','Error'); return;
+                end
+                def.type='YieldReactor'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
+                def.basisSpecies=ctrls{3}.Value;
+                def.conversionMode=strtrim(lower(ctrls{4}.Value)); def.conversion=ctrls{5}.Value;
+                def.productSpecies=pIdx; def.productYields=pY;
+                u=proc.units.YieldReactor(app.findStream(def.inlet), app.findStream(def.outlet), ...
+                    def.basisSpecies, def.conversion, def.productSpecies, def.productYields, ...
+                    'conversionMode', def.conversionMode);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogEquilibriumReactor(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            ns = numel(app.speciesNames);
+            [d, ctrls] = app.makeDialog('Configure EquilibriumReactor', 520, 230, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Nu vector:','text',num2str(zeros(1,ns))}, ...
+                 {'Equilibrium K:','numeric',1}, ...
+                 {'Reference species index:','numeric',1}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=num2str(u.nu.');
+                ctrls{4}.Value=u.Keq;
+                ctrls{5}.Value=u.referenceSpecies;
+            elseif numel(sNames)>=2
+                ctrls{2}.Value=sNames{2};
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                nu = str2num(ctrls{3}.Value); %#ok
+                if numel(nu) ~= ns
+                    uialert(d,sprintf('Nu vector must have %d entries.',ns),'Error'); return;
+                end
+                def.type='EquilibriumReactor'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
+                def.nu=nu; def.Keq=ctrls{4}.Value; def.referenceSpecies=ctrls{5}.Value;
+                u=proc.units.EquilibriumReactor(app.findStream(def.inlet), app.findStream(def.outlet), ...
+                    def.nu, def.Keq, 'referenceSpecies', def.referenceSpecies);
                 app.commitUnit(u,def,editIdx); delete(d);
             end
         end
@@ -1505,6 +1666,35 @@ classdef MathLabApp < handle
                     if ~isempty(sIn) && ~isempty(sOut)
                         u = proc.units.Reactor(sIn, sOut, def.reactions, def.conversion);
                     end
+                case 'StoichiometricReactor'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.StoichiometricReactor(sIn, sOut, def.nu, ...
+                            'extent', def.extent, 'extentMode', def.extentMode, ...
+                            'referenceSpecies', def.referenceSpecies);
+                    end
+                case 'ConversionReactor'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.ConversionReactor(sIn, sOut, def.nu, def.keySpecies, ...
+                            def.conversion, 'conversionMode', def.conversionMode);
+                    end
+                case 'YieldReactor'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.YieldReactor(sIn, sOut, def.basisSpecies, def.conversion, ...
+                            def.productSpecies, def.productYields, 'conversionMode', def.conversionMode);
+                    end
+                case 'EquilibriumReactor'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.EquilibriumReactor(sIn, sOut, def.nu, def.Keq, ...
+                            'referenceSpecies', def.referenceSpecies);
+                    end
                 case 'Separator'
                     sIn = app.findStream(def.inlet);
                     sA  = app.findStream(def.outletA);
@@ -1619,6 +1809,18 @@ classdef MathLabApp < handle
                             fprintf(fid, 'rxn.name = "%s";\n', def.reactions.name);
                             fprintf(fid, 'fs.addUnit(proc.units.Reactor(%s, %s, rxn, %.4g));\n', ...
                                 def.inlet, def.outlet, def.conversion);
+                        case 'StoichiometricReactor'
+                            fprintf(fid, 'fs.addUnit(proc.units.StoichiometricReactor(%s, %s, %s, ''extent'', %.6g, ''extentMode'', ''%s'', ''referenceSpecies'', %d));\n', ...
+                                def.inlet, def.outlet, mat2str(def.nu), def.extent, def.extentMode, def.referenceSpecies);
+                        case 'ConversionReactor'
+                            fprintf(fid, 'fs.addUnit(proc.units.ConversionReactor(%s, %s, %s, %d, %.6g, ''conversionMode'', ''%s''));\n', ...
+                                def.inlet, def.outlet, mat2str(def.nu), def.keySpecies, def.conversion, def.conversionMode);
+                        case 'YieldReactor'
+                            fprintf(fid, 'fs.addUnit(proc.units.YieldReactor(%s, %s, %d, %.6g, %s, %s, ''conversionMode'', ''%s''));\n', ...
+                                def.inlet, def.outlet, def.basisSpecies, def.conversion, mat2str(def.productSpecies), mat2str(def.productYields), def.conversionMode);
+                        case 'EquilibriumReactor'
+                            fprintf(fid, 'fs.addUnit(proc.units.EquilibriumReactor(%s, %s, %s, %.6g, ''referenceSpecies'', %d));\n', ...
+                                def.inlet, def.outlet, mat2str(def.nu), def.Keq, def.referenceSpecies);
                         case 'Separator'
                             fprintf(fid, 'fs.addUnit(proc.units.Separator(%s, %s, %s, %s));\n', ...
                                 def.inlet, def.outletA, def.outletB, mat2str(def.phi,6));
