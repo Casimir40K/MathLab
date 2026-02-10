@@ -151,6 +151,35 @@ function u = buildUnitFromDef(def, streams)
             if ~isempty(sIn) && ~isempty(sOut)
                 u = proc.units.Reactor(sIn, sOut, def.reactions, def.conversion);
             end
+        case 'StoichiometricReactor'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                u = proc.units.StoichiometricReactor(sIn, sOut, def.nu, ...
+                    'extent', def.extent, 'extentMode', def.extentMode, ...
+                    'referenceSpecies', def.referenceSpecies);
+            end
+        case 'ConversionReactor'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                u = proc.units.ConversionReactor(sIn, sOut, def.nu, def.keySpecies, ...
+                    def.conversion, 'conversionMode', def.conversionMode);
+            end
+        case 'YieldReactor'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                u = proc.units.YieldReactor(sIn, sOut, def.basisSpecies, def.conversion, ...
+                    def.productSpecies, def.productYields, 'conversionMode', def.conversionMode);
+            end
+        case 'EquilibriumReactor'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                u = proc.units.EquilibriumReactor(sIn, sOut, def.nu, def.Keq, ...
+                    'referenceSpecies', def.referenceSpecies);
+            end
         case 'Separator'
             sIn = findS(def.inlet, streams);
             sA = findS(def.outletA, streams);
