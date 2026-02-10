@@ -90,6 +90,29 @@ The app re-solves the entire flowsheet for each point and plots the result. Poin
 
 ---
 
+
+### Hidden Solver Debug Logging
+
+Solver debug output is **off by default**. You can enable it only from code or environment variables:
+
+```matlab
+solver = proc.ProcessSolver(streams, units);
+solver.debugLevel = 2;   % 0=off, 1=iter summary, 2=+top residuals at exit, 3=+periodic top residuals
+solver.debugTopN = 10;
+solver.debugEvery = 0;   % 0 = only at exit
+solver.solve();
+```
+
+Or set an environment variable before launching MATLAB:
+
+```bash
+export MATHLAB_DEBUG=2
+```
+
+`MATHLAB_DEBUG` raises the active debug level without changing call sites, and can be combined with solver settings.
+
+---
+
 ## Key Concepts
 
 ### Known vs Unknown

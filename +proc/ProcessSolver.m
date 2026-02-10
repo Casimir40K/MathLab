@@ -49,6 +49,14 @@ classdef ProcessSolver < handle
         % Optional callback: called each iteration as iterCallback(iter, rNorm)
         % Set this before calling solve() to get real-time updates.
         iterCallback = []   % function_handle or empty
+
+        % Hidden debug controls (off by default)
+        debug logical = false
+        debugLevel double = 0
+        debugTopN double = 10
+        debugEvery double = 0
+        debugOut double = 1
+        debugEqNames logical = true
     end
 
     properties (Dependent)
@@ -76,6 +84,7 @@ classdef ProcessSolver < handle
 
         function solve(obj)
             obj.applySolverSettingsStruct();
+            dbg = obj.resolveDebugOptions();
 
             obj.logLines = strings(0,1);
             obj.residualHistory = [];
@@ -92,6 +101,7 @@ classdef ProcessSolver < handle
             end
 
             [x, obj.map] = obj.packUnknowns();
+            eqNames = obj.buildEquationLabels();
 
             vars = string({obj.map.var});
             obj.log('Packed unknowns: %d total (%d T, %d P)', ...
@@ -182,6 +192,13 @@ classdef ProcessSolver < handle
                 obj.log('Iter %3d: ||r||=%.4e (rel=%.3e)  ||dx||=%.3e  alpha=%.3e  bt=%d  J=%s', ...
                     k, rn, relRn, norm(dx), alpha, bt, jacobianMode);
 
+                if dbg.level >= 1
+                    obj.debugPrintIter(k, rn, r, dx, alpha, bt, dbg);
+                    if dbg.level >= 3 && dbg.every > 0 && mod(k, dbg.every) == 0
+                        obj.debugPrintTopResiduals(r, dbg, eqNames, sprintf('iter %d', k));
+                    end
+                end
+
                 % Fire callback for real-time plotting
                 obj.fireCallback(k, rn);
 
@@ -196,6 +213,10 @@ classdef ProcessSolver < handle
                     obj.fireCallback(k+1, finalR);
                     warning('Max iterations reached. Final ||r||=%.6e', finalR);
                 end
+            end
+
+            if dbg.level >= 2
+                obj.debugPrintTopResiduals(r, dbg, eqNames, 'solver exit');
             end
 
             if ~obj.printToConsole && ~isempty(obj.logLines)
@@ -305,6 +326,105 @@ classdef ProcessSolver < handle
                 r  = [r; ru(:)];
             end
             ok = all(isfinite(r));
+        end
+
+        function dbg = resolveDebugOptions(obj)
+            dbg = struct( ...
+                'level', max(0, floor(obj.debugLevel)), ...
+                'topN', max(1, floor(obj.debugTopN)), ...
+                'every', max(0, floor(obj.debugEvery)), ...
+                'out', obj.debugOut, ...
+                'eqNames', logical(obj.debugEqNames));
+
+            if obj.debug && dbg.level < 1
+                dbg.level = 1;
+            end
+
+            if isstruct(obj.solverSettings) && isfield(obj.solverSettings, 'debugStruct')
+                ds = obj.solverSettings.debugStruct;
+                if isstruct(ds)
+                    if isfield(ds, 'level'),   dbg.level = max(dbg.level, floor(ds.level)); end
+                    if isfield(ds, 'topN'),    dbg.topN = max(1, floor(ds.topN)); end
+                    if isfield(ds, 'every'),   dbg.every = max(0, floor(ds.every)); end
+                    if isfield(ds, 'out'),     dbg.out = ds.out; end
+                    if isfield(ds, 'eqNames'), dbg.eqNames = logical(ds.eqNames); end
+                end
+            end
+
+            envLevel = str2double(getenv('MATHLAB_DEBUG'));
+            if isfinite(envLevel) && envLevel > 0
+                dbg.level = max(dbg.level, floor(envLevel));
+            end
+        end
+
+        function debugPrintIter(obj, iter, rn2, r, dx, alpha, bt, dbg)
+            rnInf = norm(r, inf);
+            dxn = norm(dx, 2);
+            [maxVal, maxIdx] = max(abs(r));
+            if isempty(maxIdx), maxIdx = 0; maxVal = NaN; maxSigned = NaN;
+            else, maxSigned = r(maxIdx);
+            end
+
+            fprintf(dbg.out, 'Iter %3d: ||r||2=%.3e  ||r||inf=%.3e  ||dx||=%.3e  alpha=%.3e  bt=%d  maxEq=%d (|r|=%.3e, r=%+.3e)\n', ...
+                iter, rn2, rnInf, dxn, alpha, bt, maxIdx, maxVal, maxSigned);
+        end
+
+        function debugPrintTopResiduals(obj, r, dbg, eqNames, context)
+            if isempty(r)
+                return
+            end
+
+            n = min(numel(r), dbg.topN);
+            [~, order] = sort(abs(r), 'descend');
+            topIdx = order(1:n);
+
+            fprintf(dbg.out, 'Top %d residual components (%s):\n', n, context);
+            for i = 1:n
+                idx = topIdx(i);
+                label = sprintf('eq %4d', idx);
+                if dbg.eqNames && idx <= numel(eqNames) && strlength(eqNames(idx)) > 0
+                    label = char(eqNames(idx));
+                end
+                fprintf(dbg.out, '  [%3d] %-40s : %+.3e\n', idx, label, r(idx));
+            end
+        end
+
+        function eqNames = buildEquationLabels(obj)
+            eqNames = strings(0,1);
+            for u = 1:numel(obj.units)
+                unit = obj.units{u};
+                unitResiduals = unit.equations();
+                nEq = numel(unitResiduals);
+
+                labels = strings(nEq,1);
+                if ismethod(unit, 'equationLabels')
+                    try
+                        labels = string(unit.equationLabels());
+                    catch
+                        labels = strings(nEq,1);
+                    end
+                end
+
+                if numel(labels) ~= nEq
+                    labels = strings(nEq,1);
+                end
+
+                unitName = class(unit);
+                if ismethod(unit, 'describe')
+                    try
+                        unitName = string(unit.describe());
+                    catch
+                        unitName = string(class(unit));
+                    end
+                end
+
+                for i = 1:nEq
+                    if strlength(labels(i)) == 0
+                        labels(i) = sprintf('%s: eq %d', char(unitName), i);
+                    end
+                end
+                eqNames = [eqNames; labels(:)];
+            end
         end
 
         function J = fdJacobianSafe(obj, x, r0)
