@@ -151,6 +151,35 @@ function u = buildUnitFromDef(def, streams)
             if ~isempty(sIn) && ~isempty(sOut)
                 u = proc.units.Reactor(sIn, sOut, def.reactions, def.conversion);
             end
+        case 'StoichiometricReactor'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                u = proc.units.StoichiometricReactor(sIn, sOut, def.nu, ...
+                    'extent', def.extent, 'extentMode', def.extentMode, ...
+                    'referenceSpecies', def.referenceSpecies);
+            end
+        case 'ConversionReactor'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                u = proc.units.ConversionReactor(sIn, sOut, def.nu, def.keySpecies, ...
+                    def.conversion, 'conversionMode', def.conversionMode);
+            end
+        case 'YieldReactor'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                u = proc.units.YieldReactor(sIn, sOut, def.basisSpecies, def.conversion, ...
+                    def.productSpecies, def.productYields, 'conversionMode', def.conversionMode);
+            end
+        case 'EquilibriumReactor'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                u = proc.units.EquilibriumReactor(sIn, sOut, def.nu, def.Keq, ...
+                    'referenceSpecies', def.referenceSpecies);
+            end
         case 'Separator'
             sIn = findS(def.inlet, streams);
             sA = findS(def.outletA, streams);
@@ -164,6 +193,86 @@ function u = buildUnitFromDef(def, streams)
             sPur = findS(def.purge, streams);
             if ~isempty(sIn) && ~isempty(sRec) && ~isempty(sPur)
                 u = proc.units.Purge(sIn, sRec, sPur, def.beta);
+            end
+        case 'Splitter'
+            sIn = findS(def.inlet, streams);
+            outS = {};
+            for k = 1:numel(def.outlets)
+                s = findS(def.outlets{k}, streams);
+                if isempty(s), return; end
+                outS{end+1} = s; %#ok
+            end
+            if ~isempty(sIn)
+                if isfield(def, 'splitFractions')
+                    u = proc.units.Splitter(sIn, outS, 'fractions', def.splitFractions);
+                else
+                    u = proc.units.Splitter(sIn, outS, 'flows', def.specifiedOutletFlows);
+                end
+            end
+        case 'Recycle'
+            sSrc = findS(def.source, streams);
+            sTear = findS(def.tear, streams);
+            if ~isempty(sSrc) && ~isempty(sTear)
+                u = proc.units.Recycle(sSrc, sTear);
+            end
+        case 'Bypass'
+            sIn = findS(def.inlet, streams);
+            sProcIn = findS(def.processInlet, streams);
+            sByp = findS(def.bypassStream, streams);
+            sRet = findS(def.processReturn, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sProcIn) && ~isempty(sByp) && ~isempty(sRet) && ~isempty(sOut)
+                u = proc.units.Bypass(sIn, sProcIn, sByp, sRet, sOut, def.bypassFraction);
+            end
+        case 'Manifold'
+            inS = {};
+            for k = 1:numel(def.inlets)
+                s = findS(def.inlets{k}, streams);
+                if isempty(s), return; end
+                inS{end+1} = s; %#ok
+            end
+            outS = {};
+            for k = 1:numel(def.outlets)
+                s = findS(def.outlets{k}, streams);
+                if isempty(s), return; end
+                outS{end+1} = s; %#ok
+            end
+            u = proc.units.Manifold(inS, outS, def.route);
+        case 'Source'
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sOut)
+                opts = struct();
+                if isfield(def,'totalFlow'), opts.totalFlow = def.totalFlow; end
+                if isfield(def,'composition'), opts.composition = def.composition; end
+                if isfield(def,'componentFlows'), opts.componentFlows = def.componentFlows; end
+                u = proc.units.Source(sOut, opts);
+            end
+        case 'Sink'
+            sIn = findS(def.inlet, streams);
+            if ~isempty(sIn), u = proc.units.Sink(sIn); end
+        case 'DesignSpec'
+            s = findS(def.stream, streams);
+            if ~isempty(s)
+                u = proc.units.DesignSpec(s, def.metric, def.target, def.componentIndex);
+            end
+        case 'Adjust'
+            if isfield(def,'designSpecIndex') && isfield(def,'ownerIndex') && ...
+                    def.designSpecIndex <= numel(units) && def.ownerIndex <= numel(units)
+                ds = units{def.designSpecIndex};
+                owner = units{def.ownerIndex};
+                u = proc.units.Adjust(ds, owner, def.field, def.index, def.minValue, def.maxValue);
+            end
+        case 'Calculator'
+            lhs = findS(def.lhsStream, streams);
+            a = findS(def.aStream, streams);
+            b = findS(def.bStream, streams);
+            if ~isempty(lhs) && ~isempty(a) && ~isempty(b)
+                u = proc.units.Calculator(lhs, def.lhsField, a, def.aField, def.operator, b, def.bField);
+            end
+        case 'Constraint'
+            s = findS(def.stream, streams);
+            if ~isempty(s)
+                u = proc.units.Constraint(s, def.field, def.value, def.index);
             end
     end
 end

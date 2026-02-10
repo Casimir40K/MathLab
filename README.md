@@ -18,6 +18,10 @@ MathLab/
         ├── Link.m
         ├── Mixer.m
         ├── Reactor.m
+        ├── StoichiometricReactor.m
+        ├── ConversionReactor.m
+        ├── YieldReactor.m
+        ├── EquilibriumReactor.m
         ├── Separator.m
         └── Purge.m
 ```
@@ -90,6 +94,34 @@ The app re-solves the entire flowsheet for each point and plots the result. Poin
 
 ---
 
+
+## Available Unit Operations
+
+- Material/path units: `Link`, `Mixer`, `Splitter`, `Separator`, `Purge`, `Recycle`, `Bypass`, `Manifold`, `Reactor`
+- Specification / solver-control blocks: `Source`, `Sink`, `DesignSpec`, `Adjust`, `Calculator`, `Constraint`
+
+### Hidden Solver Debug Logging
+
+Solver debug output is **off by default**. You can enable it only from code or environment variables:
+
+```matlab
+solver = proc.ProcessSolver(streams, units);
+solver.debugLevel = 2;   % 0=off, 1=iter summary, 2=+top residuals at exit, 3=+periodic top residuals
+solver.debugTopN = 10;
+solver.debugEvery = 0;   % 0 = only at exit
+solver.solve();
+```
+
+Or set an environment variable before launching MATLAB:
+
+```bash
+export MATHLAB_DEBUG=2
+```
+
+`MATHLAB_DEBUG` raises the active debug level without changing call sites, and can be combined with solver settings.
+
+---
+
 ## Key Concepts
 
 ### Known vs Unknown
@@ -107,6 +139,12 @@ Defined by species indices, stoichiometric coefficients, and a single-pass conve
 
 Example: `2H₂ + O₂ → 2H₂O` with species `{H2, O2, H2O}`:
 reactants = `[1 2]`, products = `[3]`, stoich = `[-2 -1 2]`
+
+Mass-only reactor variants are also available:
+- `StoichiometricReactor` (extent-based: `n_out = n_in + nu*xi`)
+- `ConversionReactor` (limiting-reactant conversion -> extent)
+- `YieldReactor` (basis-reactant conversion + product yields)
+- `EquilibriumReactor` (single-reaction ideal mass-action equilibrium)
 
 ---
 
