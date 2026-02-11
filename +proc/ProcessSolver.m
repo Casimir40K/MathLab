@@ -607,13 +607,16 @@ classdef ProcessSolver < handle
                     map(end+1) = struct('streamIndex',si,'var','z','subIndex',[], 'unitIndex',NaN,'bounds',[-Inf Inf],'owner',[],'field','');
                 end
                 if obj.anyYUnknown(s)
-                    y0 = s.y;
-                    if any(isnan(y0))||isempty(y0), y0=ones(1,obj.ns)/obj.ns; end
-                    y0 = obj.normalizeSimplex(y0);
-                    a0 = log(max(y0,1e-12));
-                    for j = 1:obj.ns
+                    [packIdx, a0] = obj.initialCompositionLogits(s);
+
+                    % Gauge-fixing for composition logits:
+                    % Only (nUnknownComponents-1) logits are packed and one
+                    % unknown component is anchored at zero in unpackUnknowns().
+                    % This removes the softmax shift invariance so we do not
+                    % re-introduce redundant composition DOFs.
+                    for j = 1:numel(packIdx)
                         x(end+1,1) = a0(j);
-                        map(end+1) = struct('streamIndex',si,'var','a','subIndex',j, 'unitIndex',NaN,'bounds',[-Inf Inf],'owner',[],'field','');
+                        map(end+1) = struct('streamIndex',si,'var','a','subIndex',packIdx(j), 'unitIndex',NaN,'bounds',[-Inf Inf],'owner',[],'field','');
                     end
                 end
                 knownT = isprop(s,'known')&&isstruct(s.known)&&isfield(s.known,'T')&&...
@@ -689,8 +692,8 @@ classdef ProcessSolver < handle
                 if ~isnan(z(si))
                     s.n_dot = exp(min(max(z(si),obj.zMin),obj.zMax));
                 end
-                if any(~isnan(a(si,:)))
-                    s.y = obj.softmax(a(si,:));
+                if obj.anyYUnknown(s)
+                    s.y = obj.reconstructComposition(s, a(si,:));
                 end
                 if ~isnan(s.T), s.T = min(max(s.T,obj.TMin),obj.TMax); end
                 if ~isnan(s.P), s.P = min(max(s.P,obj.PMin),obj.PMax); end
@@ -715,12 +718,106 @@ classdef ProcessSolver < handle
         end
 
         function tf = anyYUnknown(obj,s)
-            ns=obj.ns;
+            unknownIdx = obj.unknownCompositionIndices(s);
+            tf = ~isempty(unknownIdx);
+        end
+
+        function knownMask = compositionKnownMask(obj, s)
             if isprop(s,'known')&&isstruct(s.known)&&isfield(s.known,'y')
                 ky=s.known.y;
-                if islogical(ky)&&numel(ky)==ns, tf=any(~ky); else, tf=true; end
-            else, tf=true;
+                if islogical(ky)&&numel(ky)==obj.ns
+                    knownMask = logical(reshape(ky,1,[]));
+                    return;
+                end
             end
+
+            knownMask = false(1,obj.ns);
+        end
+
+        function unknownIdx = unknownCompositionIndices(obj, s)
+            knownMask = obj.compositionKnownMask(s);
+            unknownIdx = find(~knownMask);
+        end
+
+        function [packIdx, a0] = initialCompositionLogits(obj, s)
+            unknownIdx = obj.unknownCompositionIndices(s);
+            nUnknown = numel(unknownIdx);
+            if nUnknown <= 1
+                packIdx = [];
+                a0 = [];
+                return;
+            end
+
+            y0 = s.y;
+            if isempty(y0) || any(~isfinite(y0)) || numel(y0) ~= obj.ns
+                y0 = ones(1,obj.ns) / obj.ns;
+            end
+            y0 = max(reshape(y0,1,[]), 0);
+
+            knownMask = obj.compositionKnownMask(s);
+            knownSum = sum(y0(knownMask));
+            remaining = max(1 - knownSum, 0);
+
+            yUnknown = y0(unknownIdx);
+            yUnknown = max(yUnknown, 0);
+            if sum(yUnknown) <= 0
+                yUnknown = ones(1,nUnknown) / nUnknown;
+            else
+                yUnknown = yUnknown / sum(yUnknown);
+            end
+
+            % Represent unknown composition as remaining * softmax(aUnknown).
+            % Pack only first (nUnknown-1) entries and anchor last one to 0.
+            if remaining > 0
+                pUnknown = yUnknown;
+            else
+                pUnknown = ones(1,nUnknown) / nUnknown;
+            end
+
+            aUnknown = log(max(pUnknown,1e-12));
+            anchor = aUnknown(end);
+            aUnknown = aUnknown - anchor;
+
+            packIdx = unknownIdx(1:end-1);
+            a0 = aUnknown(1:end-1).';
+        end
+
+        function y = reconstructComposition(obj, s, packedA)
+            y = s.y;
+            if isempty(y) || any(~isfinite(y)) || numel(y) ~= obj.ns
+                y = ones(1,obj.ns) / obj.ns;
+            end
+            y = reshape(y,1,[]);
+
+            knownMask = obj.compositionKnownMask(s);
+            unknownIdx = find(~knownMask);
+            nUnknown = numel(unknownIdx);
+            if nUnknown == 0
+                y = obj.normalizeSimplex(max(y,0));
+                return;
+            end
+
+            y = max(y, 0);
+            knownSum = sum(y(knownMask));
+            remaining = max(1 - knownSum, 0);
+
+            if nUnknown == 1
+                y(unknownIdx) = remaining;
+                return;
+            end
+
+            aUnknown = zeros(1,nUnknown);
+            packIdx = unknownIdx(1:end-1);
+            for j = 1:numel(packIdx)
+                comp = packIdx(j);
+                if isfinite(packedA(comp))
+                    aUnknown(j) = packedA(comp);
+                end
+            end
+
+            % Gauge-fixed softmax: last unknown component is anchored to 0,
+            % so only (nUnknown-1) independent logits are required.
+            y(unknownIdx) = remaining .* obj.softmax(aUnknown);
         end
 
         function v = safeInit(~,c,fb)
