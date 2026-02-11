@@ -14,17 +14,17 @@ classdef Mixer < handle
             eqs = [];
         
             nspecies = length(obj.outlet.y);
-        
-            % Total molar flow balance (independent closure)
-            total_in = 0;
-            for i = 1:length(obj.inlets)
-                total_in = total_in + obj.inlets{i}.n_dot;
-            end
-            eqs(end+1) = obj.outlet.n_dot - total_in;
-        
-            % Independent component balances: only nspecies-1
-            % The last component balance is implied by (total balance + normalization)
-            for j = 1:(nspecies-1)
+
+            % Component molar-flow balances for every species.
+            %
+            % Note: we intentionally enforce all species component balances
+            % and do NOT add an explicit total flow balance. With normalized
+            % compositions, the total balance is implied by summing these
+            % component equations. This avoids dropping one species balance
+            % (typically the dominant recycle/product component), which can
+            % otherwise leave the worst mismatch unrepresented and stall
+            % convergence with mixer-dominated residuals.
+            for j = 1:nspecies
                 total_species_in = 0;
                 for i = 1:length(obj.inlets)
                     total_species_in = total_species_in + obj.inlets{i}.n_dot * obj.inlets{i}.y(j);
