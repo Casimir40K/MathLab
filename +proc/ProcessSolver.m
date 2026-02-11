@@ -247,6 +247,9 @@ classdef ProcessSolver < handle
                     if dbg.level >= 3 && dbg.every > 0 && mod(k, dbg.every) == 0
                         obj.debugPrintTopResiduals(r, dbg, eqNames, sprintf('iter %d', k));
                     end
+                    if dbg.level >= 2 && dbg.every > 0 && mod(k, dbg.every) == 0
+                        obj.debugPrintMixerCompositionConsistency(r, dbg, sprintf('iter %d', k));
+                    end
                 end
 
                 % Fire callback for real-time plotting
@@ -273,6 +276,7 @@ classdef ProcessSolver < handle
 
             if dbg.level >= 2
                 obj.debugPrintTopResiduals(r, dbg, eqNames, 'solver exit');
+                obj.debugPrintMixerCompositionConsistency(r, dbg, 'solver exit');
             end
 
             if ~obj.printToConsole && ~isempty(obj.logLines)
@@ -785,28 +789,30 @@ classdef ProcessSolver < handle
         function y = reconstructComposition(obj, s, packedA)
             y = s.y;
             if isempty(y) || any(~isfinite(y)) || numel(y) ~= obj.ns
-                y = ones(1,obj.ns) / obj.ns;
+                y = ones(obj.ns,1) / obj.ns;
             end
-            y = reshape(y,1,[]);
+            y = reshape(y,[],1);
 
             knownMask = obj.compositionKnownMask(s);
             unknownIdx = find(~knownMask);
             nUnknown = numel(unknownIdx);
             if nUnknown == 0
-                y = obj.normalizeSimplex(max(y,0));
+                y = obj.normalizeSimplex(y);
+                obj.warnIfCompositionNotNormalized(s, y);
                 return;
             end
 
-            y = max(y, 0);
             knownSum = sum(y(knownMask));
-            remaining = max(1 - knownSum, 0);
+            remaining = 1 - knownSum;
 
             if nUnknown == 1
                 y(unknownIdx) = remaining;
+                y = y / sum(y);
+                obj.warnIfCompositionNotNormalized(s, y);
                 return;
             end
 
-            aUnknown = zeros(1,nUnknown);
+            aUnknown = zeros(nUnknown,1);
             packIdx = unknownIdx(1:end-1);
             for j = 1:numel(packIdx)
                 comp = packIdx(j);
@@ -818,18 +824,91 @@ classdef ProcessSolver < handle
             % Gauge-fixed softmax: last unknown component is anchored to 0,
             % so only (nUnknown-1) independent logits are required.
             y(unknownIdx) = remaining .* obj.softmax(aUnknown);
+            y = y / sum(y);
+            obj.warnIfCompositionNotNormalized(s, y);
         end
 
         function v = safeInit(~,c,fb)
             if isempty(c)||isnan(c), v=fb; else, v=c; end
         end
 
-        function y = softmax(~,a)
-            a=a-max(a); ea=exp(a); y=ea/sum(ea);
+        function y = softmax(~,aPacked)
+            % Reconstruct full logits by anchoring the final component at 0,
+            % then apply stable shift-by-max softmax.
+            aFull = [aPacked(:); 0];
+            aFull = aFull - max(aFull);
+            e = exp(aFull);
+            y = e / sum(e);
         end
 
         function y = normalizeSimplex(~,y)
-            y=max(y,1e-12); y=y/sum(y);
+            y = y(:);
+            s = sum(y);
+            if ~isfinite(s) || s == 0
+                y = ones(numel(y),1) / numel(y);
+            else
+                y = y / s;
+            end
+        end
+
+        function warnIfCompositionNotNormalized(obj, s, y)
+            if obj.debugLevel < 1
+                return
+            end
+            sumY = sum(y);
+            delta = sumY - 1;
+            if isfinite(delta) && abs(delta) > 1e-10
+                fprintf(obj.debugOut, 'WARN composition normalization drift: stream=%s, sum(y)-1=%+.3e\n', ...
+                    string(s.name), delta);
+            end
+        end
+
+        function debugPrintMixerCompositionConsistency(obj, r, dbg, context)
+            [mixer, dominantEq, dominantVal] = obj.findDominantMixer(r);
+            if isempty(mixer)
+                return
+            end
+
+            fprintf(dbg.out, 'Composition normalization + component-flow consistency (%s):\n', context);
+            fprintf(dbg.out, '  Dominant mixer: %s (eq %d, r=%+.3e)\n', string(mixer.describe()), dominantEq, dominantVal);
+
+            streamsToReport = [mixer.inlets(:); {mixer.outlet}];
+            for i = 1:numel(streamsToReport)
+                s = streamsToReport{i};
+                y = s.y(:);
+                sumY = sum(y);
+                minY = min(y);
+                maxY = max(y);
+                compFlowSum = sum(s.n_dot .* y);
+                diffFlow = compFlowSum - s.n_dot;
+                fprintf(dbg.out, '  %s: sum(y)=%.15f (sum(y)-1=%+.3e) min=%.6e max=%.6e\n', ...
+                    string(s.name), sumY, sumY - 1, minY, maxY);
+                fprintf(dbg.out, '      n_dot=%.6e, sum(n_dot*y)=%.6e, diff=%+.3e\n', ...
+                    s.n_dot, compFlowSum, diffFlow);
+            end
+        end
+
+        function [dominantMixer, eqIdx, eqVal] = findDominantMixer(obj, r)
+            dominantMixer = [];
+            eqIdx = NaN;
+            eqVal = NaN;
+            cursor = 1;
+            bestAbs = -Inf;
+            for u = 1:numel(obj.units)
+                unit = obj.units{u};
+                nEq = numel(unit.equations());
+                idx = cursor:(cursor + nEq - 1);
+                if isa(unit, 'proc.units.Mixer') && ~isempty(idx)
+                    [localAbs, localPos] = max(abs(r(idx)));
+                    if isfinite(localAbs) && localAbs > bestAbs
+                        bestAbs = localAbs;
+                        dominantMixer = unit;
+                        eqIdx = idx(localPos);
+                        eqVal = r(eqIdx);
+                    end
+                end
+                cursor = cursor + nEq;
+            end
         end
     end
 end
