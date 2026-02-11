@@ -148,15 +148,18 @@ classdef Flowsheet < handle
 
                 % y
                 if hasKnownY(s)
-                    % count unknown components
-                    for j = 1:ns
-                        if ~s.known.y(j)
-                            n = n + 1;
-                        end
+                    nUnknownY = sum(~s.known.y(:));
+                    if nUnknownY > 0
+                        % Gauge fixing for softmax logits: when composition
+                        % has free dimensions, one unknown component can be
+                        % anchored so composition contributes (nUnknownY-1)
+                        % independent unknowns.
+                        n = n + max(nUnknownY - 1, 0);
                     end
                 else
-                    % if no known flags exist, treat full y as unknown (matches softmax approach)
-                    n = n + ns;
+                    % If known.y flags are unavailable/invalid, composition is
+                    % fully free and contributes (ns-1) independent unknowns.
+                    n = n + max(ns - 1, 0);
                 end
             end
 
