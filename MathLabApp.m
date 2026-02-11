@@ -717,9 +717,18 @@ classdef MathLabApp < handle
         end
 
         function fs = buildFlowsheet(app)
+            [resolvedDefs, aliasByOutlet] = app.resolveIdentityLinks(app.unitDefs);
             fs = proc.Flowsheet(app.speciesNames);
-            for i = 1:numel(app.streams), fs.addStream(app.streams{i}); end
-            for i = 1:numel(app.units),   fs.addUnit(app.units{i}); end
+            for i = 1:numel(app.streams)
+                fs.addStream(app.streams{i});
+            end
+            app.addStreamAliasesToFlowsheet(fs, aliasByOutlet);
+            for i = 1:numel(resolvedDefs)
+                u = app.buildUnitFromDef(resolvedDefs{i}, 'includeIdentityLink', false);
+                if ~isempty(u)
+                    fs.addUnit(u);
+                end
+            end
         end
     end
 
@@ -1843,10 +1852,17 @@ classdef MathLabApp < handle
             end
         end
 
-        function u = buildUnitFromDef(app, def)
+        function u = buildUnitFromDef(app, def, varargin)
             u = [];
+            p = inputParser;
+            p.addParameter('includeIdentityLink', true, @(x)islogical(x)&&isscalar(x));
+            p.parse(varargin{:});
+            includeIdentityLink = p.Results.includeIdentityLink;
             switch def.type
                 case 'Link'
+                    if app.isIdentityLinkDef(def) && ~includeIdentityLink
+                        return;
+                    end
                     sIn = app.findStream(def.inlet);
                     sOut = app.findStream(def.outlet);
                     if ~isempty(sIn) && ~isempty(sOut)
@@ -2037,7 +2053,13 @@ classdef MathLabApp < handle
                     def = cfg.unitDefs{i};
                     switch def.type
                         case 'Link'
-                            fprintf(fid, 'fs.addUnit(proc.units.Link(%s, %s));\n', def.inlet, def.outlet);
+                            isIdentityLink = ~(isfield(def, 'mode') && ~strcmp(def.mode, 'identity'));
+                            if isfield(def, 'isIdentity')
+                                isIdentityLink = logical(def.isIdentity);
+                            end
+                            if ~isIdentityLink
+                                fprintf(fid, 'fs.addUnit(proc.units.Link(%s, %s));\n', def.inlet, def.outlet);
+                            end
                         case 'Mixer'
                             inStr = strjoin(cellfun(@(n) n, def.inlets, 'Uni',false), ', ');
                             fprintf(fid, 'fs.addUnit(proc.units.Mixer({%s}, %s));\n', inStr, def.outlet);
@@ -2314,6 +2336,85 @@ classdef MathLabApp < handle
     %  HELPERS
     % =====================================================================
     methods (Access = private)
+        function [resolvedDefs, aliasByOutlet] = resolveIdentityLinks(app, unitDefs)
+            aliasByOutlet = containers.Map('KeyType','char','ValueType','char');
+            resolvedDefs = cell(size(unitDefs));
+            for i = 1:numel(unitDefs)
+                def = unitDefs{i};
+                if ~isstruct(def)
+                    resolvedDefs{i} = def;
+                    continue;
+                end
+                def = app.rewriteDefStreams(def, aliasByOutlet);
+                if strcmp(def.type, 'Link') && app.isIdentityLinkDef(def)
+                    inletRoot = app.resolveAliasName(def.inlet, aliasByOutlet);
+                    aliasByOutlet(char(def.outlet)) = inletRoot;
+                    continue;
+                end
+                resolvedDefs{i} = def;
+            end
+            resolvedDefs = resolvedDefs(~cellfun(@isempty, resolvedDefs));
+        end
+
+        function def = rewriteDefStreams(app, def, aliasByOutlet)
+            fnSingles = {'inlet','source','stream','tear','processInlet','bypassStream','processReturn', ...
+                'lhsStream','aStream','bStream','recycle','purge','outlet','outletA','outletB'};
+            for i = 1:numel(fnSingles)
+                f = fnSingles{i};
+                if ~isfield(def, f)
+                    continue;
+                end
+                if strcmp(f, 'outlet') && strcmp(def.type, 'Link') && app.isIdentityLinkDef(def)
+                    continue;
+                end
+                def.(f) = app.resolveAliasName(def.(f), aliasByOutlet);
+            end
+            if isfield(def, 'inlets')
+                for k = 1:numel(def.inlets)
+                    def.inlets{k} = app.resolveAliasName(def.inlets{k}, aliasByOutlet);
+                end
+            end
+            if isfield(def, 'outlets')
+                for k = 1:numel(def.outlets)
+                    def.outlets{k} = app.resolveAliasName(def.outlets{k}, aliasByOutlet);
+                end
+            end
+        end
+
+        function addStreamAliasesToFlowsheet(app, fs, aliasByOutlet)
+            if isempty(aliasByOutlet)
+                return;
+            end
+            keys = aliasByOutlet.keys;
+            for i = 1:numel(keys)
+                aliasName = keys{i};
+                targetName = aliasByOutlet(aliasName);
+                s = app.findStream(targetName);
+                if ~isempty(s)
+                    fs.addAlias(aliasName, s);
+                end
+            end
+        end
+
+        function tf = isIdentityLinkDef(~, def)
+            tf = strcmp(def.type, 'Link') && ~(isfield(def, 'mode') && ~strcmp(def.mode, 'identity'));
+            if isfield(def, 'isIdentity')
+                tf = logical(def.isIdentity);
+            end
+        end
+
+        function outName = resolveAliasName(~, name, aliasByOutlet)
+            outName = char(string(name));
+            visited = containers.Map('KeyType','char','ValueType','logical');
+            while isKey(aliasByOutlet, outName)
+                if isKey(visited, outName)
+                    break;
+                end
+                visited(outName) = true;
+                outName = aliasByOutlet(outName);
+            end
+        end
+
         function names = getStreamNames(app)
             names = cellfun(@(s) char(string(s.name)), app.streams, 'Uni', false);
         end
