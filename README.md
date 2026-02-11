@@ -191,3 +191,27 @@ For the GUI to support your custom unit, add a dialog method in MathLabApp.m and
 | DOF not square | Need more known specs, or a missing/extra unit |
 | Line search failed | The problem may be too stiff — try smaller conversion or check connections |
 | Stream not found in dialog | Create the stream first on the Streams tab |
+
+
+## Regression Test Suite
+
+Run the full non-GUI regression suite before pushing to `development`:
+
+```matlab
+cd('path/to/MathLab')
+summary = run_regression_suite();
+```
+
+To collect all failures without throwing (useful in CI diagnostics):
+
+```matlab
+summary = run_regression_suite('errorOnFailure', false);
+```
+
+The suite lives at `run_regression_suite.m` and covers:
+- end-to-end recycle-flowsheet solve + convergence checks
+- config round-trip solve via `runFromConfig`
+- mass-only reactor variants (`Stoichiometric`, `Conversion`, `Yield`, `Equilibrium`)
+- topology blocks (`Bypass`, `Splitter`, `Manifold`, `Recycle`)
+- spec/control blocks (`Source`, `Sink`, `DesignSpec`, `Adjust`, `Calculator`, `Constraint`)
+
