@@ -67,7 +67,7 @@ classdef ProcessSolver < handle
 
         % Hidden debug controls (off by default)
         debug logical = false
-        debugLevel double = 0
+        debugLevel double = 2
         debugTopN double = 10
         debugEvery double = 0
         debugOut double = 1
