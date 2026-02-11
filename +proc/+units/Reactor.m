@@ -8,7 +8,6 @@ classdef Reactor < handle
 
     methods
         function obj = Reactor(inlet, outlet, reactions, conversion)
-            % Constructor
             obj.inlet = inlet;
             obj.outlet = outlet;
             obj.reactions = reactions;
@@ -16,21 +15,17 @@ classdef Reactor < handle
         end
 
         function eqs = equations(obj)
-            % Returns residuals for solver
-
             eqs = [];
-
-            % Number of species
             nspecies = length(obj.outlet.y);
 
-            % --- Step 1: Copy inlet moles ---
-            n_species = obj.inlet.n_dot * obj.inlet.y; % moles per species
+            % Step 1: Copy inlet moles
+            n_species = obj.inlet.n_dot * obj.inlet.y;
 
-            % --- Step 2: Apply reactions ---
+            % Step 2: Apply reactions
             for r = 1:length(obj.reactions)
                 rxn = obj.reactions(r);
 
-                % Compute limiting reactant in moles (stoich-adjusted)
+                % Limiting reactant (stoich-adjusted)
                 limiting_n = inf;
                 for i = 1:length(rxn.reactants)
                     idx = rxn.reactants(i);
@@ -43,31 +38,40 @@ classdef Reactor < handle
                 % Update species moles
                 for i = 1:length(rxn.reactants)
                     idx = rxn.reactants(i);
-                    n_species(idx) = n_species(idx) + rxn.stoich(idx) * xi; % negative for reactants
+                    n_species(idx) = n_species(idx) + rxn.stoich(idx) * xi;
                 end
                 for i = 1:length(rxn.products)
                     idx = rxn.products(i);
-                    n_species(idx) = n_species(idx) + rxn.stoich(idx) * xi; % positive for products
+                    n_species(idx) = n_species(idx) + rxn.stoich(idx) * xi;
                 end
             end
 
-            % --- Step 3: Compute total moles and mole fractions ---
+            % Step 3: Compute total moles and mole fractions
             n_out = sum(n_species);
             y_out = n_species / n_out;
 
-            % --- Step 4: Build residuals ---
-
-            % Total flow
+            % Step 4: Build residuals
             eqs(end+1) = obj.outlet.n_dot - n_out;
-
-            % Species balances
             for j = 1:nspecies
                 eqs(end+1) = obj.outlet.n_dot * obj.outlet.y(j) - n_out * y_out(j);
             end
-
-            % Temperature and pressure (simple copy)
             eqs(end+1) = obj.outlet.T - obj.inlet.T;
             eqs(end+1) = obj.outlet.P - obj.inlet.P;
+        end
+
+        function str = describe(obj)
+            if isfield(obj.reactions, 'name') && ~isempty(obj.reactions(1).name)
+                rxnName = obj.reactions(1).name;
+            else
+                rxnName = "reaction";
+            end
+            str = sprintf('Reactor: %s -> %s (X=%.2f, %s)', ...
+                string(obj.inlet.name), string(obj.outlet.name), ...
+                obj.conversion, rxnName);
+        end
+
+        function names = streamNames(obj)
+            names = {char(string(obj.inlet.name)), char(string(obj.outlet.name))};
         end
     end
 end

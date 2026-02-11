@@ -63,13 +63,12 @@ for u = {M1,L23,R1,Sep1,P1}
     fs.addUnit(u{1});
 end
 
+% DOF checker, makes sure that we are good to go.
 [nU, nE] = fs.checkDOF();
 fprintf('DOF check: unknowns=%d, eqs=%d\n', nU, nE);
 
 % Solve
-% (Adjust these names to match your ProcessSolver properties; if you renamed verbose -> printToConsole, etc.,
-% update accordingly.)
-fs.solve('maxIter', 80, 'tolAbs', 1e-9, 'verbose', true);
+fs.solve('maxIter', 2000, 'tolAbs', 1e-9, 'verbose', true);
 
 % Stream table
 T = fs.streamTable();
