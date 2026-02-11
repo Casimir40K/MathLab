@@ -13,7 +13,15 @@ classdef Mixer < handle
         function eqs = equations(obj)
             eqs = [];
 
-            % Species balances as primary conserved equations
+            % Independence rationale:
+            % - Use component-flow balances (n_dot*y) as the primary conservation equations.
+            % - Do NOT add a separate total-flow equation here because it is implied by
+            %   summing the component balances when stream compositions are normalized.
+            % - Keep only physically intended closure relations (T/P matching assumption).
+            %
+            % This keeps the mixer equation set free of avoidable dependent constraints.
+
+            % Component molar balances as primary conserved equations
             nspecies = length(obj.outlet.y);
             for j = 1:nspecies
                 total_species_in = 0;
@@ -23,7 +31,7 @@ classdef Mixer < handle
                 eqs(end+1) = obj.outlet.n_dot * obj.outlet.y(j) - total_species_in;
             end
 
-            % T/P: match first inlet (adiabatic assumption)
+            % Mechanical/thermal closure: match first inlet (adiabatic/isobaric assumption)
             eqs(end+1) = obj.outlet.T - obj.inlets{1}.T;
             eqs(end+1) = obj.outlet.P - obj.inlets{1}.P;
         end
