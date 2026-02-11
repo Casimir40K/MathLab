@@ -812,7 +812,9 @@ classdef ProcessSolver < handle
                 return;
             end
 
-            aUnknown = zeros(nUnknown,1);
+            % softmax() expects only the packed free logits (nUnknown-1).
+            % It appends the anchored final logit internally.
+            aUnknown = zeros(nUnknown-1,1);
             packIdx = unknownIdx(1:end-1);
             for j = 1:numel(packIdx)
                 comp = packIdx(j);
