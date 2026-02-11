@@ -40,9 +40,8 @@ classdef Splitter < handle
                 f = obj.splitFractions;
                 for k = 1:nOut
                     out = obj.outlets{k};
-                    eqs(end+1) = out.n_dot - f(k) * obj.inlet.n_dot;
                     for i = 1:ns
-                        eqs(end+1) = out.y(i) - obj.inlet.y(i);
+                        eqs(end+1) = out.n_dot * out.y(i) - f(k) * obj.inlet.n_dot * obj.inlet.y(i);
                     end
                 end
             else

@@ -23,16 +23,15 @@ classdef Bypass < handle
             ns = numel(obj.inlet.y);
             b = obj.bypassFraction;
 
-            % Internal splitter section
-            eqs(end+1) = obj.processInlet.n_dot - (1 - b) * obj.inlet.n_dot;
-            eqs(end+1) = obj.bypassStream.n_dot - b * obj.inlet.n_dot;
+            % Internal splitter section (component balances)
             for i = 1:ns
-                eqs(end+1) = obj.processInlet.y(i) - obj.inlet.y(i);
-                eqs(end+1) = obj.bypassStream.y(i) - obj.inlet.y(i);
+                eqs(end+1) = obj.processInlet.n_dot * obj.processInlet.y(i) ...
+                          - (1 - b) * obj.inlet.n_dot * obj.inlet.y(i);
+                eqs(end+1) = obj.bypassStream.n_dot * obj.bypassStream.y(i) ...
+                          - b * obj.inlet.n_dot * obj.inlet.y(i);
             end
 
-            % Internal mixer section
-            eqs(end+1) = obj.outlet.n_dot - (obj.bypassStream.n_dot + obj.processReturn.n_dot);
+            % Internal mixer section (component balances)
             for i = 1:ns
                 eqs(end+1) = obj.outlet.n_dot * obj.outlet.y(i) ...
                           - (obj.bypassStream.n_dot * obj.bypassStream.y(i) ...
