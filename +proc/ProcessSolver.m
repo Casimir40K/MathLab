@@ -7,12 +7,26 @@ classdef ProcessSolver < handle
         maxIter = 60
         tolAbs  = 1e-9
         fdEps   = 1e-7
+        fdScheme string = "forward"   % forward|central|mixed
+        fdCentralColumns double = []   % used when fdScheme="mixed"
 
         % Jacobian controls
         kFD = 6
         enableBroyden logical = true
         broydenMinStepNorm2 = 1e-20
         broydenMinRcond = 1e-14
+
+        % Weighted residual controls (W * r, W * J)
+        equationWeights double = []
+        defaultResidualScale = 1
+        flowResidualScale = 1
+        temperatureResidualScale = 1
+        pressureResidualScale = 1
+        useWeightedNormForConvergence logical = true
+
+        % Jacobian refresh trigger when convergence stalls
+        stallRatioThreshold = 0.9
+        stallIterWindow = 3
 
         % Optional high-level settings bundle; fields matching solver
         % properties are applied at solve() start.
@@ -40,6 +54,7 @@ classdef ProcessSolver < handle
 
         % Convergence history (populated during solve)
         residualHistory double = []
+        weightedResidualHistory double = []
         stepHistory     double = []
         alphaHistory    double = []
 
@@ -88,6 +103,7 @@ classdef ProcessSolver < handle
 
             obj.logLines = strings(0,1);
             obj.residualHistory = [];
+            obj.weightedResidualHistory = [];
             obj.stepHistory     = [];
             obj.alphaHistory    = [];
 
@@ -111,27 +127,42 @@ classdef ProcessSolver < handle
             if ~ok
                 error('Initial residual returned NaN/Inf. Check initial guesses (n_dot,y,T,P).');
             end
-            r0 = norm(r);
-            obj.residualHistory(end+1) = r0;
+            w = obj.buildEquationWeights(eqNames, numel(r));
+            r0u = norm(r);
+            r0w = norm(w .* r);
+            obj.residualHistory(end+1) = r0u;
+            obj.weightedResidualHistory(end+1) = r0w;
             obj.stepHistory(end+1)     = NaN;
             obj.alphaHistory(end+1)    = NaN;
 
-            obj.log('Initial ||r|| = %.6e (unknowns=%d, eqs=%d)', r0, numel(x), numel(r));
+            obj.log('Initial ||r|| = %.6e, ||W*r|| = %.6e (unknowns=%d, eqs=%d)', r0u, r0w, numel(x), numel(r));
 
             % Fire callback for initial state
-            obj.fireCallback(0, r0);
+            if obj.useWeightedNormForConvergence
+                obj.fireCallback(0, r0w);
+            else
+                obj.fireCallback(0, r0u);
+            end
 
             J = [];
             forceFD = true;
+            stallCount = 0;
+            disableBroydenOnce = false;
 
             for k = 1:obj.maxIter
-                rn = norm(r);
-                if rn < obj.tolAbs
-                    obj.residualHistory(end+1) = rn;
+                rnU = norm(r);
+                rnW = norm(w .* r);
+                rnConv = rnU;
+                if obj.useWeightedNormForConvergence
+                    rnConv = rnW;
+                end
+                if rnConv < obj.tolAbs
+                    obj.residualHistory(end+1) = rnU;
+                    obj.weightedResidualHistory(end+1) = rnW;
                     obj.stepHistory(end+1)     = 0;
                     obj.alphaHistory(end+1)    = 0;
-                    obj.log('Converged at iter %d: ||r||=%.6e (resEvals=%d)', k, rn, obj.residualEvalCount);
-                    obj.fireCallback(k, rn);
+                    obj.log('Converged at iter %d: ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', k, rnU, rnW, obj.residualEvalCount);
+                    obj.fireCallback(k, rnConv);
                     break
                 end
 
@@ -144,13 +175,13 @@ classdef ProcessSolver < handle
                     jacobianMode = "REUSE";
                 end
 
-                dx = obj.solveLinearLM(J, -r);
+                dx = obj.solveLinearLM(J, -r, w);
 
                 if any(~isfinite(dx))
                     error('dx contains NaN/Inf. Model may be ill-conditioned.');
                 end
 
-                [accepted, x_new, r_new, alpha, bt] = obj.backtrackingLineSearch(x, dx, rn);
+                [accepted, x_new, r_new, alpha, bt] = obj.backtrackingLineSearch(x, dx, rnW, w);
                 if ~accepted
                     % Fallback: discard reused/Broyden Jacobian and retry with
                     % a fresh finite-difference Jacobian at the current state.
@@ -158,8 +189,8 @@ classdef ProcessSolver < handle
                     jacobianMode = "FD-RETRY";
                     forceFD = false;
 
-                    dx = obj.solveLinearLM(J, -r);
-                    [accepted, x_new, r_new, alpha, bt] = obj.backtrackingLineSearch(x, dx, rn);
+                    dx = obj.solveLinearLM(J, -r, w);
+                    [accepted, x_new, r_new, alpha, bt] = obj.backtrackingLineSearch(x, dx, rnW, w);
 
                     if ~accepted
                         error('Line search failed at iteration %d.', k);
@@ -173,7 +204,7 @@ classdef ProcessSolver < handle
                 r = r_new;
 
                 % Update Jacobian after accepted step
-                if obj.enableBroyden
+                if obj.enableBroyden && ~disableBroydenOnce
                     [J, broydenAccepted] = obj.tryBroydenUpdate(J, s, r - rPrev);
                     if broydenAccepted
                         jacobianMode = jacobianMode + "+BROYDEN";
@@ -181,37 +212,62 @@ classdef ProcessSolver < handle
                         forceFD = true;
                         jacobianMode = jacobianMode + "+BROYDEN-SKIP";
                     end
+                elseif disableBroydenOnce
+                    disableBroydenOnce = false;
+                    jacobianMode = jacobianMode + "+BROYDEN-OFF";
+                end
+
+                rnWNew = norm(w .* r);
+                if rnWNew / max(rnW, eps) > obj.stallRatioThreshold
+                    stallCount = stallCount + 1;
+                else
+                    stallCount = 0;
+                end
+                if stallCount >= max(1, round(obj.stallIterWindow))
+                    forceFD = true;
+                    disableBroydenOnce = true;
+                    stallCount = 0;
+                    obj.log('Stall detected at iter %d (ratio=%.3f). Forcing FD rebuild and skipping Broyden next step.', ...
+                        k, rnWNew / max(rnW, eps));
                 end
 
                 % Record history
-                obj.residualHistory(end+1) = rn;
+                obj.residualHistory(end+1) = rnU;
+                obj.weightedResidualHistory(end+1) = rnW;
                 obj.stepHistory(end+1)     = norm(dx);
                 obj.alphaHistory(end+1)    = alpha;
 
-                relRn = rn / max(r0, eps);
-                obj.log('Iter %3d: ||r||=%.4e (rel=%.3e)  ||dx||=%.3e  alpha=%.3e  bt=%d  J=%s', ...
-                    k, rn, relRn, norm(dx), alpha, bt, jacobianMode);
+                relRnU = rnU / max(r0u, eps);
+                relRnW = rnW / max(r0w, eps);
+                obj.log('Iter %3d: ||r||=%.4e (rel=%.3e)  ||W*r||=%.4e (rel=%.3e)  ||dx||=%.3e  alpha=%.3e  bt=%d  J=%s', ...
+                    k, rnU, relRnU, rnW, relRnW, norm(dx), alpha, bt, jacobianMode);
 
                 if dbg.level >= 1
-                    obj.debugPrintIter(k, rn, r, dx, alpha, bt, dbg);
+                    obj.debugPrintIter(k, rnW, r, dx, alpha, bt, dbg);
                     if dbg.level >= 3 && dbg.every > 0 && mod(k, dbg.every) == 0
                         obj.debugPrintTopResiduals(r, dbg, eqNames, sprintf('iter %d', k));
                     end
                 end
 
                 % Fire callback for real-time plotting
-                obj.fireCallback(k, rn);
+                obj.fireCallback(k, rnConv);
 
 
 
                 if k == obj.maxIter
                     finalR = norm(r);
+                    finalRW = norm(w .* r);
                     obj.residualHistory(end+1) = finalR;
+                    obj.weightedResidualHistory(end+1) = finalRW;
                     obj.stepHistory(end+1) = NaN;
                     obj.alphaHistory(end+1) = NaN;
-                    obj.log('Max iterations reached. Final ||r||=%.6e (resEvals=%d)', finalR, obj.residualEvalCount);
-                    obj.fireCallback(k+1, finalR);
-                    warning('Max iterations reached. Final ||r||=%.6e', finalR);
+                    obj.log('Max iterations reached. Final ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', finalR, finalRW, obj.residualEvalCount);
+                    if obj.useWeightedNormForConvergence
+                        obj.fireCallback(k+1, finalRW);
+                    else
+                        obj.fireCallback(k+1, finalR);
+                    end
+                    warning('Max iterations reached. Final ||r||=%.6e, ||W*r||=%.6e', finalR, finalRW);
                 end
             end
 
@@ -431,17 +487,40 @@ classdef ProcessSolver < handle
             n = numel(x); m = numel(r0);
             J = zeros(m,n);
             for k = 1:n
-                x2 = x;
                 step = obj.fdEps * max(1, abs(x(k)));
-                x2(k) = x2(k) + step;
-                [r2, ok] = obj.tryResiduals(x2);
-                if ~ok, J(:,k) = 0;
-                else,   J(:,k) = (r2 - r0) / step;
+                doCentral = obj.useCentralDifferenceForColumn(k);
+
+                if doCentral
+                    xPlus = x;
+                    xMinus = x;
+                    xPlus(k) = xPlus(k) + step;
+                    xMinus(k) = xMinus(k) - step;
+                    [rPlus, okPlus] = obj.tryResiduals(xPlus);
+                    [rMinus, okMinus] = obj.tryResiduals(xMinus);
+
+                    if okPlus && okMinus
+                        J(:,k) = (rPlus - rMinus) / (2 * step);
+                    elseif okPlus
+                        J(:,k) = (rPlus - r0) / step;
+                    elseif okMinus
+                        J(:,k) = (r0 - rMinus) / step;
+                    else
+                        J(:,k) = 0;
+                    end
+                else
+                    x2 = x;
+                    x2(k) = x2(k) + step;
+                    [r2, ok] = obj.tryResiduals(x2);
+                    if ~ok
+                        J(:,k) = 0;
+                    else
+                        J(:,k) = (r2 - r0) / step;
+                    end
                 end
             end
         end
 
-        function [accepted, x_new, r_new, alpha, bt] = backtrackingLineSearch(obj, x, dx, rn)
+        function [accepted, x_new, r_new, alpha, bt] = backtrackingLineSearch(obj, x, dx, rnW, w)
             alpha = obj.damping;
             bt = 0;
             accepted = false;
@@ -451,7 +530,7 @@ classdef ProcessSolver < handle
             while bt < 30
                 xCand = x + alpha*dx;
                 [rCand, okCand] = obj.tryResiduals(xCand);
-                if okCand && norm(rCand) <= rn
+                if okCand && norm(w .* rCand) <= rnW
                     accepted = true;
                     x_new = xCand;
                     r_new = rCand;
@@ -465,9 +544,11 @@ classdef ProcessSolver < handle
             end
         end
 
-        function dx = solveLinearLM(~, J, b)
+        function dx = solveLinearLM(~, J, b, w)
+            Jw = J .* w;
+            bw = b .* w;
             n = size(J,2);
-            JTJ = J.' * J;  JTb = J.' * b;
+            JTJ = Jw.' * Jw;  JTb = Jw.' * bw;
             lambda = 1e-6 * max(1, trace(JTJ)/max(1,n));
             I = eye(n);
             for it = 1:12
@@ -476,6 +557,44 @@ classdef ProcessSolver < handle
                 lambda = lambda * 10;
             end
             dx = zeros(n,1);
+        end
+
+        function tf = useCentralDifferenceForColumn(obj, idx)
+            scheme = lower(strtrim(char(obj.fdScheme)));
+            switch scheme
+                case 'central'
+                    tf = true;
+                case 'mixed'
+                    tf = any(idx == obj.fdCentralColumns);
+                otherwise
+                    tf = false;
+            end
+        end
+
+        function w = buildEquationWeights(obj, eqNames, nEq)
+            if isempty(obj.equationWeights)
+                w = ones(nEq,1) / max(obj.defaultResidualScale, eps);
+                for i = 1:nEq
+                    lbl = lower(char(eqNames(min(i, numel(eqNames)))));
+                    if contains(lbl, 'pressure') || contains(lbl, ' p') || contains(lbl, 'dp')
+                        w(i) = 1 / max(obj.pressureResidualScale, eps);
+                    elseif contains(lbl, 'temp') || contains(lbl, 'enthalpy') || contains(lbl, 'energy')
+                        w(i) = 1 / max(obj.temperatureResidualScale, eps);
+                    elseif contains(lbl, 'flow') || contains(lbl, 'mass') || contains(lbl, 'mole') || contains(lbl, 'n_dot')
+                        w(i) = 1 / max(obj.flowResidualScale, eps);
+                    end
+                end
+            else
+                ew = obj.equationWeights(:);
+                if isscalar(ew)
+                    w = repmat(ew, nEq, 1);
+                elseif numel(ew) == nEq
+                    w = ew;
+                else
+                    error('equationWeights must be scalar or length %d.', nEq);
+                end
+            end
+            w(~isfinite(w) | w <= 0) = 1;
         end
 
         function [x, map] = packUnknowns(obj)
