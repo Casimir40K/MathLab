@@ -4,20 +4,16 @@ function summary = run_regression_suite(varargin)
 %   solver workflows and all built-in unit blocks.
 %
 %   SUMMARY = RUN_REGRESSION_SUITE('verbose', false) suppresses per-test logs.
-%   SUMMARY = RUN_REGRESSION_SUITE('errorOnFailure', false) returns summary
-%   without throwing, even when one or more tests fail.
 %
 %   Intended use before merging/upgrading MathLab:
 %       summary = run_regression_suite();
 %
-%   The runner always executes all tests and aggregates failures.
+%   Throws an error if any test fails.
 
     p = inputParser;
     p.addParameter('verbose', true, @(x)islogical(x) && isscalar(x));
-    p.addParameter('errorOnFailure', true, @(x)islogical(x) && isscalar(x));
     p.parse(varargin{:});
     verbose = p.Results.verbose;
-    errorOnFailure = p.Results.errorOnFailure;
 
     tests = {
         @testSolveWaterRecycleFlowsheet
@@ -52,6 +48,8 @@ function summary = run_regression_suite(varargin)
                 fprintf('[FAIL] %s (%.3fs)\n', results(i).name, results(i).seconds);
                 fprintf('%s\n', results(i).message);
             end
+            error('MathLab:RegressionSuiteFailed', ...
+                'Regression suite failed in %s.\n%s', results(i).name, results(i).message);
         end
     end
 
@@ -61,36 +59,10 @@ function summary = run_regression_suite(varargin)
     summary.failedTests = n - summary.passedTests;
     summary.totalSeconds = toc(tSuite);
     summary.results = results;
-    summary.failedNames = strings(0, 1);
-    summary.failedMessages = strings(0, 1);
 
-    if summary.failedTests == 0
-        if verbose
-            fprintf('\nMathLab regression suite passed: %d/%d tests in %.3fs\n', ...
-                summary.passedTests, summary.totalTests, summary.totalSeconds);
-        end
-    else
-        failedIdx = find(~[results.passed]);
-        summary.failedNames = string({results(failedIdx).name}).';
-        summary.failedMessages = string({results(failedIdx).message}).';
-
-        if verbose
-            fprintf('\nMathLab regression suite found %d failure(s):\n', summary.failedTests);
-            for j = 1:numel(failedIdx)
-                r = results(failedIdx(j));
-                fprintf('  - %s (%.3fs)\n', r.name, r.seconds);
-            end
-        end
-
-        if errorOnFailure
-            msg = sprintf('Regression suite completed with %d failure(s) out of %d test(s).', ...
-                summary.failedTests, summary.totalTests);
-            for j = 1:numel(failedIdx)
-                r = results(failedIdx(j));
-                msg = sprintf('%s\n\n- %s\n%s', msg, r.name, r.message);
-            end
-            error('MathLab:RegressionSuiteFailed', '%s', msg);
-        end
+    if verbose
+        fprintf('\nMathLab regression suite passed: %d/%d tests in %.3fs\n', ...
+            summary.passedTests, summary.totalTests, summary.totalSeconds);
     end
 end
 

@@ -202,12 +202,6 @@ cd('path/to/MathLab')
 summary = run_regression_suite();
 ```
 
-To collect all failures without throwing (useful in CI diagnostics):
-
-```matlab
-summary = run_regression_suite('errorOnFailure', false);
-```
-
 The suite lives at `run_regression_suite.m` and covers:
 - end-to-end recycle-flowsheet solve + convergence checks
 - config round-trip solve via `runFromConfig`
