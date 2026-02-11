@@ -49,10 +49,13 @@ function [T, solver] = runFromConfig(configFile, varargin)
         streams{end+1} = s; %#ok
     end
 
+    % --- Resolve identity links as stream aliases ---
+    [resolvedDefs, aliasByOutlet] = resolveIdentityLinks(cfg.unitDefs);
+
     % --- Rebuild units ---
     units = {};
-    for i = 1:numel(cfg.unitDefs)
-        def = cfg.unitDefs{i};
+    for i = 1:numel(resolvedDefs)
+        def = resolvedDefs{i};
         u = buildUnitFromDef(def, streams);
         if ~isempty(u)
             units{end+1} = u; %#ok
@@ -64,6 +67,7 @@ function [T, solver] = runFromConfig(configFile, varargin)
     % --- Build flowsheet ---
     fs = proc.Flowsheet(cfg.speciesNames);
     for i = 1:numel(streams), fs.addStream(streams{i}); end
+    addStreamAliasesToFlowsheet(fs, aliasByOutlet, streams);
     for i = 1:numel(units),   fs.addUnit(units{i}); end
 
     % --- Settings ---
@@ -131,6 +135,9 @@ function u = buildUnitFromDef(def, streams)
     u = [];
     switch def.type
         case 'Link'
+            if isIdentityLinkDef(def)
+                return;
+            end
             sIn = findS(def.inlet, streams);
             sOut = findS(def.outlet, streams);
             if ~isempty(sIn) && ~isempty(sOut)
@@ -274,6 +281,121 @@ function u = buildUnitFromDef(def, streams)
             if ~isempty(s)
                 u = proc.units.Constraint(s, def.field, def.value, def.index);
             end
+    end
+end
+
+
+function [resolvedDefs, aliasByOutlet] = resolveIdentityLinks(unitDefs)
+    aliasByOutlet = containers.Map('KeyType','char','ValueType','char');
+    resolvedDefs = cell(size(unitDefs));
+    for i = 1:numel(unitDefs)
+        def = unitDefs{i};
+        if ~isstruct(def)
+            resolvedDefs{i} = def;
+            continue;
+        end
+        def = rewriteDefStreams(def, aliasByOutlet);
+        if strcmp(def.type, 'Link') && isIdentityLinkDef(def)
+            inletRoot = resolveAliasName(def.inlet, aliasByOutlet);
+            aliasByOutlet(char(def.outlet)) = inletRoot;
+            continue;
+        end
+        resolvedDefs{i} = def;
+    end
+    resolvedDefs = resolvedDefs(~cellfun(@isempty, resolvedDefs));
+end
+
+function def = rewriteDefStreams(def, aliasByOutlet)
+    if isfield(def, 'inlet')
+        def.inlet = resolveAliasName(def.inlet, aliasByOutlet);
+    end
+    if isfield(def, 'source')
+        def.source = resolveAliasName(def.source, aliasByOutlet);
+    end
+    if isfield(def, 'stream')
+        def.stream = resolveAliasName(def.stream, aliasByOutlet);
+    end
+    if isfield(def, 'tear')
+        def.tear = resolveAliasName(def.tear, aliasByOutlet);
+    end
+    if isfield(def, 'processInlet')
+        def.processInlet = resolveAliasName(def.processInlet, aliasByOutlet);
+    end
+    if isfield(def, 'bypassStream')
+        def.bypassStream = resolveAliasName(def.bypassStream, aliasByOutlet);
+    end
+    if isfield(def, 'processReturn')
+        def.processReturn = resolveAliasName(def.processReturn, aliasByOutlet);
+    end
+    if isfield(def, 'lhsStream')
+        def.lhsStream = resolveAliasName(def.lhsStream, aliasByOutlet);
+    end
+    if isfield(def, 'aStream')
+        def.aStream = resolveAliasName(def.aStream, aliasByOutlet);
+    end
+    if isfield(def, 'bStream')
+        def.bStream = resolveAliasName(def.bStream, aliasByOutlet);
+    end
+    if isfield(def, 'recycle')
+        def.recycle = resolveAliasName(def.recycle, aliasByOutlet);
+    end
+    if isfield(def, 'purge')
+        def.purge = resolveAliasName(def.purge, aliasByOutlet);
+    end
+    if isfield(def, 'outlet')
+        if ~strcmp(def.type, 'Link') || ~isIdentityLinkDef(def)
+            def.outlet = resolveAliasName(def.outlet, aliasByOutlet);
+        end
+    end
+    if isfield(def, 'outletA')
+        def.outletA = resolveAliasName(def.outletA, aliasByOutlet);
+    end
+    if isfield(def, 'outletB')
+        def.outletB = resolveAliasName(def.outletB, aliasByOutlet);
+    end
+    if isfield(def, 'inlets')
+        for k = 1:numel(def.inlets)
+            def.inlets{k} = resolveAliasName(def.inlets{k}, aliasByOutlet);
+        end
+    end
+    if isfield(def, 'outlets')
+        for k = 1:numel(def.outlets)
+            def.outlets{k} = resolveAliasName(def.outlets{k}, aliasByOutlet);
+        end
+    end
+end
+
+function addStreamAliasesToFlowsheet(fs, aliasByOutlet, streams)
+    if isempty(aliasByOutlet)
+        return;
+    end
+    keys = aliasByOutlet.keys;
+    for i = 1:numel(keys)
+        aliasName = keys{i};
+        targetName = aliasByOutlet(aliasName);
+        s = findS(targetName, streams);
+        if ~isempty(s)
+            fs.addAlias(aliasName, s);
+        end
+    end
+end
+
+function tf = isIdentityLinkDef(def)
+    tf = strcmp(def.type, 'Link') && ~(isfield(def, 'mode') && ~strcmp(def.mode, 'identity'));
+    if isfield(def, 'isIdentity')
+        tf = logical(def.isIdentity);
+    end
+end
+
+function outName = resolveAliasName(name, aliasByOutlet)
+    outName = char(string(name));
+    visited = containers.Map('KeyType','char','ValueType','logical');
+    while isKey(aliasByOutlet, outName)
+        if isKey(visited, outName)
+            break;
+        end
+        visited(outName) = true;
+        outName = aliasByOutlet(outName);
     end
 end
 

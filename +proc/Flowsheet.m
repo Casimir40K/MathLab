@@ -3,6 +3,8 @@ classdef Flowsheet < handle
         species   % cellstr species list (global order)
         streams   % cell array of proc.Stream objects
         units     % cell array of unit objects (proc.units.*) with equations()
+        streamDisplayNames % user-visible stream names for reporting (incl. aliases)
+        streamDisplayRefs  % stream object handles aligned with streamDisplayNames
     end
 
     methods
@@ -10,10 +12,22 @@ classdef Flowsheet < handle
             obj.species = species;
             obj.streams = {};
             obj.units   = {};
+            obj.streamDisplayNames = {};
+            obj.streamDisplayRefs  = {};
         end
 
-        function addStream(obj, s)
+        function addStream(obj, s, displayName)
             obj.streams{end+1} = s;
+            if nargin < 3 || isempty(displayName)
+                displayName = char(string(s.name));
+            end
+            obj.streamDisplayNames{end+1} = char(string(displayName));
+            obj.streamDisplayRefs{end+1}  = s;
+        end
+
+        function addAlias(obj, aliasName, s)
+            obj.streamDisplayNames{end+1} = char(string(aliasName));
+            obj.streamDisplayRefs{end+1}  = s;
         end
 
         function addUnit(obj, u)
@@ -75,7 +89,7 @@ classdef Flowsheet < handle
 
         function T = streamTable(obj)
             % Table including: name, n_dot, T, P, y_i, and species molar flows n_i = n_dot*y_i
-            N  = numel(obj.streams);
+            N  = numel(obj.streamDisplayRefs);
             ns = numel(obj.species);
 
             names = strings(N,1);
@@ -86,8 +100,8 @@ classdef Flowsheet < handle
             Ni    = nan(N,ns);
 
             for i = 1:N
-                s = obj.streams{i};
-                names(i) = string(s.name);
+                s = obj.streamDisplayRefs{i};
+                names(i) = string(obj.streamDisplayNames{i});
                 n_dot(i) = s.n_dot;
                 TT(i)    = s.T;
                 PP(i)    = s.P;
