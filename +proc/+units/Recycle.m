@@ -12,9 +12,9 @@ classdef Recycle < handle
 
         function eqs = equations(obj)
             eqs = [];
-            eqs(end+1) = obj.tear.n_dot - obj.source.n_dot;
             for i = 1:numel(obj.source.y)
-                eqs(end+1) = obj.tear.y(i) - obj.source.y(i);
+                eqs(end+1) = obj.tear.n_dot * obj.tear.y(i) ...
+                          - obj.source.n_dot * obj.source.y(i);
             end
         end
 

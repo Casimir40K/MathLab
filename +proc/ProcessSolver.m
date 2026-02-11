@@ -7,12 +7,26 @@ classdef ProcessSolver < handle
         maxIter = 60
         tolAbs  = 1e-9
         fdEps   = 1e-7
+        fdScheme string = "forward"   % forward|central|mixed
+        fdCentralColumns double = []   % used when fdScheme="mixed"
 
         % Jacobian controls
         kFD = 6
         enableBroyden logical = true
         broydenMinStepNorm2 = 1e-20
         broydenMinRcond = 1e-14
+
+        % Weighted residual controls (W * r, W * J)
+        equationWeights double = []
+        defaultResidualScale = 1
+        flowResidualScale = 1
+        temperatureResidualScale = 1
+        pressureResidualScale = 1
+        useWeightedNormForConvergence logical = true
+
+        % Jacobian refresh trigger when convergence stalls
+        stallRatioThreshold = 0.9
+        stallIterWindow = 3
 
         % Optional high-level settings bundle; fields matching solver
         % properties are applied at solve() start.
@@ -40,6 +54,7 @@ classdef ProcessSolver < handle
 
         % Convergence history (populated during solve)
         residualHistory double = []
+        weightedResidualHistory double = []
         stepHistory     double = []
         alphaHistory    double = []
 
@@ -52,7 +67,7 @@ classdef ProcessSolver < handle
 
         % Hidden debug controls (off by default)
         debug logical = false
-        debugLevel double = 0
+        debugLevel double = 2
         debugTopN double = 10
         debugEvery double = 0
         debugOut double = 1
@@ -88,6 +103,7 @@ classdef ProcessSolver < handle
 
             obj.logLines = strings(0,1);
             obj.residualHistory = [];
+            obj.weightedResidualHistory = [];
             obj.stepHistory     = [];
             obj.alphaHistory    = [];
 
@@ -111,27 +127,42 @@ classdef ProcessSolver < handle
             if ~ok
                 error('Initial residual returned NaN/Inf. Check initial guesses (n_dot,y,T,P).');
             end
-            r0 = norm(r);
-            obj.residualHistory(end+1) = r0;
+            w = obj.buildEquationWeights(eqNames, numel(r));
+            r0u = norm(r);
+            r0w = norm(w .* r);
+            obj.residualHistory(end+1) = r0u;
+            obj.weightedResidualHistory(end+1) = r0w;
             obj.stepHistory(end+1)     = NaN;
             obj.alphaHistory(end+1)    = NaN;
 
-            obj.log('Initial ||r|| = %.6e (unknowns=%d, eqs=%d)', r0, numel(x), numel(r));
+            obj.log('Initial ||r|| = %.6e, ||W*r|| = %.6e (unknowns=%d, eqs=%d)', r0u, r0w, numel(x), numel(r));
 
             % Fire callback for initial state
-            obj.fireCallback(0, r0);
+            if obj.useWeightedNormForConvergence
+                obj.fireCallback(0, r0w);
+            else
+                obj.fireCallback(0, r0u);
+            end
 
             J = [];
             forceFD = true;
+            stallCount = 0;
+            disableBroydenOnce = false;
 
             for k = 1:obj.maxIter
-                rn = norm(r);
-                if rn < obj.tolAbs
-                    obj.residualHistory(end+1) = rn;
+                rnU = norm(r);
+                rnW = norm(w .* r);
+                rnConv = rnU;
+                if obj.useWeightedNormForConvergence
+                    rnConv = rnW;
+                end
+                if rnConv < obj.tolAbs
+                    obj.residualHistory(end+1) = rnU;
+                    obj.weightedResidualHistory(end+1) = rnW;
                     obj.stepHistory(end+1)     = 0;
                     obj.alphaHistory(end+1)    = 0;
-                    obj.log('Converged at iter %d: ||r||=%.6e (resEvals=%d)', k, rn, obj.residualEvalCount);
-                    obj.fireCallback(k, rn);
+                    obj.log('Converged at iter %d: ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', k, rnU, rnW, obj.residualEvalCount);
+                    obj.fireCallback(k, rnConv);
                     break
                 end
 
@@ -144,13 +175,13 @@ classdef ProcessSolver < handle
                     jacobianMode = "REUSE";
                 end
 
-                dx = obj.solveLinearLM(J, -r);
+                dx = obj.solveLinearLM(J, -r, w);
 
                 if any(~isfinite(dx))
                     error('dx contains NaN/Inf. Model may be ill-conditioned.');
                 end
 
-                [accepted, x_new, r_new, alpha, bt] = obj.backtrackingLineSearch(x, dx, rn);
+                [accepted, x_new, r_new, alpha, bt] = obj.backtrackingLineSearch(x, dx, rnW, w);
                 if ~accepted
                     % Fallback: discard reused/Broyden Jacobian and retry with
                     % a fresh finite-difference Jacobian at the current state.
@@ -158,8 +189,8 @@ classdef ProcessSolver < handle
                     jacobianMode = "FD-RETRY";
                     forceFD = false;
 
-                    dx = obj.solveLinearLM(J, -r);
-                    [accepted, x_new, r_new, alpha, bt] = obj.backtrackingLineSearch(x, dx, rn);
+                    dx = obj.solveLinearLM(J, -r, w);
+                    [accepted, x_new, r_new, alpha, bt] = obj.backtrackingLineSearch(x, dx, rnW, w);
 
                     if ~accepted
                         error('Line search failed at iteration %d.', k);
@@ -173,7 +204,7 @@ classdef ProcessSolver < handle
                 r = r_new;
 
                 % Update Jacobian after accepted step
-                if obj.enableBroyden
+                if obj.enableBroyden && ~disableBroydenOnce
                     [J, broydenAccepted] = obj.tryBroydenUpdate(J, s, r - rPrev);
                     if broydenAccepted
                         jacobianMode = jacobianMode + "+BROYDEN";
@@ -181,42 +212,71 @@ classdef ProcessSolver < handle
                         forceFD = true;
                         jacobianMode = jacobianMode + "+BROYDEN-SKIP";
                     end
+                elseif disableBroydenOnce
+                    disableBroydenOnce = false;
+                    jacobianMode = jacobianMode + "+BROYDEN-OFF";
+                end
+
+                rnWNew = norm(w .* r);
+                if rnWNew / max(rnW, eps) > obj.stallRatioThreshold
+                    stallCount = stallCount + 1;
+                else
+                    stallCount = 0;
+                end
+                if stallCount >= max(1, round(obj.stallIterWindow))
+                    forceFD = true;
+                    disableBroydenOnce = true;
+                    stallCount = 0;
+                    obj.log('Stall detected at iter %d (ratio=%.3f). Forcing FD rebuild and skipping Broyden next step.', ...
+                        k, rnWNew / max(rnW, eps));
                 end
 
                 % Record history
-                obj.residualHistory(end+1) = rn;
+                obj.residualHistory(end+1) = rnU;
+                obj.weightedResidualHistory(end+1) = rnW;
                 obj.stepHistory(end+1)     = norm(dx);
                 obj.alphaHistory(end+1)    = alpha;
 
-                relRn = rn / max(r0, eps);
-                obj.log('Iter %3d: ||r||=%.4e (rel=%.3e)  ||dx||=%.3e  alpha=%.3e  bt=%d  J=%s', ...
-                    k, rn, relRn, norm(dx), alpha, bt, jacobianMode);
+                relRnU = rnU / max(r0u, eps);
+                relRnW = rnW / max(r0w, eps);
+                obj.log('Iter %3d: ||r||=%.4e (rel=%.3e)  ||W*r||=%.4e (rel=%.3e)  ||dx||=%.3e  alpha=%.3e  bt=%d  J=%s', ...
+                    k, rnU, relRnU, rnW, relRnW, norm(dx), alpha, bt, jacobianMode);
 
                 if dbg.level >= 1
-                    obj.debugPrintIter(k, rn, r, dx, alpha, bt, dbg);
+                    obj.debugPrintIter(k, rnW, r, dx, alpha, bt, dbg);
                     if dbg.level >= 3 && dbg.every > 0 && mod(k, dbg.every) == 0
                         obj.debugPrintTopResiduals(r, dbg, eqNames, sprintf('iter %d', k));
+                    end
+                    if dbg.level >= 2 && dbg.every > 0 && mod(k, dbg.every) == 0
+                        obj.debugPrintMixerCompositionConsistency(r, dbg, sprintf('iter %d', k));
                     end
                 end
 
                 % Fire callback for real-time plotting
-                obj.fireCallback(k, rn);
+                obj.fireCallback(k, rnConv);
 
 
 
                 if k == obj.maxIter
                     finalR = norm(r);
+                    finalRW = norm(w .* r);
                     obj.residualHistory(end+1) = finalR;
+                    obj.weightedResidualHistory(end+1) = finalRW;
                     obj.stepHistory(end+1) = NaN;
                     obj.alphaHistory(end+1) = NaN;
-                    obj.log('Max iterations reached. Final ||r||=%.6e (resEvals=%d)', finalR, obj.residualEvalCount);
-                    obj.fireCallback(k+1, finalR);
-                    warning('Max iterations reached. Final ||r||=%.6e', finalR);
+                    obj.log('Max iterations reached. Final ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', finalR, finalRW, obj.residualEvalCount);
+                    if obj.useWeightedNormForConvergence
+                        obj.fireCallback(k+1, finalRW);
+                    else
+                        obj.fireCallback(k+1, finalR);
+                    end
+                    warning('Max iterations reached. Final ||r||=%.6e, ||W*r||=%.6e', finalR, finalRW);
                 end
             end
 
             if dbg.level >= 2
                 obj.debugPrintTopResiduals(r, dbg, eqNames, 'solver exit');
+                obj.debugPrintMixerCompositionConsistency(r, dbg, 'solver exit');
             end
 
             if ~obj.printToConsole && ~isempty(obj.logLines)
@@ -431,17 +491,40 @@ classdef ProcessSolver < handle
             n = numel(x); m = numel(r0);
             J = zeros(m,n);
             for k = 1:n
-                x2 = x;
                 step = obj.fdEps * max(1, abs(x(k)));
-                x2(k) = x2(k) + step;
-                [r2, ok] = obj.tryResiduals(x2);
-                if ~ok, J(:,k) = 0;
-                else,   J(:,k) = (r2 - r0) / step;
+                doCentral = obj.useCentralDifferenceForColumn(k);
+
+                if doCentral
+                    xPlus = x;
+                    xMinus = x;
+                    xPlus(k) = xPlus(k) + step;
+                    xMinus(k) = xMinus(k) - step;
+                    [rPlus, okPlus] = obj.tryResiduals(xPlus);
+                    [rMinus, okMinus] = obj.tryResiduals(xMinus);
+
+                    if okPlus && okMinus
+                        J(:,k) = (rPlus - rMinus) / (2 * step);
+                    elseif okPlus
+                        J(:,k) = (rPlus - r0) / step;
+                    elseif okMinus
+                        J(:,k) = (r0 - rMinus) / step;
+                    else
+                        J(:,k) = 0;
+                    end
+                else
+                    x2 = x;
+                    x2(k) = x2(k) + step;
+                    [r2, ok] = obj.tryResiduals(x2);
+                    if ~ok
+                        J(:,k) = 0;
+                    else
+                        J(:,k) = (r2 - r0) / step;
+                    end
                 end
             end
         end
 
-        function [accepted, x_new, r_new, alpha, bt] = backtrackingLineSearch(obj, x, dx, rn)
+        function [accepted, x_new, r_new, alpha, bt] = backtrackingLineSearch(obj, x, dx, rnW, w)
             alpha = obj.damping;
             bt = 0;
             accepted = false;
@@ -451,7 +534,7 @@ classdef ProcessSolver < handle
             while bt < 30
                 xCand = x + alpha*dx;
                 [rCand, okCand] = obj.tryResiduals(xCand);
-                if okCand && norm(rCand) <= rn
+                if okCand && norm(w .* rCand) <= rnW
                     accepted = true;
                     x_new = xCand;
                     r_new = rCand;
@@ -465,9 +548,11 @@ classdef ProcessSolver < handle
             end
         end
 
-        function dx = solveLinearLM(~, J, b)
+        function dx = solveLinearLM(~, J, b, w)
+            Jw = J .* w;
+            bw = b .* w;
             n = size(J,2);
-            JTJ = J.' * J;  JTb = J.' * b;
+            JTJ = Jw.' * Jw;  JTb = Jw.' * bw;
             lambda = 1e-6 * max(1, trace(JTJ)/max(1,n));
             I = eye(n);
             for it = 1:12
@@ -476,6 +561,44 @@ classdef ProcessSolver < handle
                 lambda = lambda * 10;
             end
             dx = zeros(n,1);
+        end
+
+        function tf = useCentralDifferenceForColumn(obj, idx)
+            scheme = lower(strtrim(char(obj.fdScheme)));
+            switch scheme
+                case 'central'
+                    tf = true;
+                case 'mixed'
+                    tf = any(idx == obj.fdCentralColumns);
+                otherwise
+                    tf = false;
+            end
+        end
+
+        function w = buildEquationWeights(obj, eqNames, nEq)
+            if isempty(obj.equationWeights)
+                w = ones(nEq,1) / max(obj.defaultResidualScale, eps);
+                for i = 1:nEq
+                    lbl = lower(char(eqNames(min(i, numel(eqNames)))));
+                    if contains(lbl, 'pressure') || contains(lbl, ' p') || contains(lbl, 'dp')
+                        w(i) = 1 / max(obj.pressureResidualScale, eps);
+                    elseif contains(lbl, 'temp') || contains(lbl, 'enthalpy') || contains(lbl, 'energy')
+                        w(i) = 1 / max(obj.temperatureResidualScale, eps);
+                    elseif contains(lbl, 'flow') || contains(lbl, 'mass') || contains(lbl, 'mole') || contains(lbl, 'n_dot')
+                        w(i) = 1 / max(obj.flowResidualScale, eps);
+                    end
+                end
+            else
+                ew = obj.equationWeights(:);
+                if isscalar(ew)
+                    w = repmat(ew, nEq, 1);
+                elseif numel(ew) == nEq
+                    w = ew;
+                else
+                    error('equationWeights must be scalar or length %d.', nEq);
+                end
+            end
+            w(~isfinite(w) | w <= 0) = 1;
         end
 
         function [x, map] = packUnknowns(obj)
@@ -488,13 +611,16 @@ classdef ProcessSolver < handle
                     map(end+1) = struct('streamIndex',si,'var','z','subIndex',[], 'unitIndex',NaN,'bounds',[-Inf Inf],'owner',[],'field','');
                 end
                 if obj.anyYUnknown(s)
-                    y0 = s.y;
-                    if any(isnan(y0))||isempty(y0), y0=ones(1,obj.ns)/obj.ns; end
-                    y0 = obj.normalizeSimplex(y0);
-                    a0 = log(max(y0,1e-12));
-                    for j = 1:obj.ns
+                    [packIdx, a0] = obj.initialCompositionLogits(s);
+
+                    % Gauge-fixing for composition logits:
+                    % Only (nUnknownComponents-1) logits are packed and one
+                    % unknown component is anchored at zero in unpackUnknowns().
+                    % This removes the softmax shift invariance so we do not
+                    % re-introduce redundant composition DOFs.
+                    for j = 1:numel(packIdx)
                         x(end+1,1) = a0(j);
-                        map(end+1) = struct('streamIndex',si,'var','a','subIndex',j, 'unitIndex',NaN,'bounds',[-Inf Inf],'owner',[],'field','');
+                        map(end+1) = struct('streamIndex',si,'var','a','subIndex',packIdx(j), 'unitIndex',NaN,'bounds',[-Inf Inf],'owner',[],'field','');
                     end
                 end
                 knownT = isprop(s,'known')&&isstruct(s.known)&&isfield(s.known,'T')&&...
@@ -570,8 +696,8 @@ classdef ProcessSolver < handle
                 if ~isnan(z(si))
                     s.n_dot = exp(min(max(z(si),obj.zMin),obj.zMax));
                 end
-                if any(~isnan(a(si,:)))
-                    s.y = obj.softmax(a(si,:));
+                if obj.anyYUnknown(s)
+                    s.y = obj.reconstructComposition(s, a(si,:));
                 end
                 if ~isnan(s.T), s.T = min(max(s.T,obj.TMin),obj.TMax); end
                 if ~isnan(s.P), s.P = min(max(s.P,obj.PMin),obj.PMax); end
@@ -596,24 +722,195 @@ classdef ProcessSolver < handle
         end
 
         function tf = anyYUnknown(obj,s)
-            ns=obj.ns;
+            unknownIdx = obj.unknownCompositionIndices(s);
+            tf = ~isempty(unknownIdx);
+        end
+
+        function knownMask = compositionKnownMask(obj, s)
             if isprop(s,'known')&&isstruct(s.known)&&isfield(s.known,'y')
                 ky=s.known.y;
-                if islogical(ky)&&numel(ky)==ns, tf=any(~ky); else, tf=true; end
-            else, tf=true;
+                if islogical(ky)&&numel(ky)==obj.ns
+                    knownMask = logical(reshape(ky,1,[]));
+                    return;
+                end
             end
+
+            knownMask = false(1,obj.ns);
+        end
+
+        function unknownIdx = unknownCompositionIndices(obj, s)
+            knownMask = obj.compositionKnownMask(s);
+            unknownIdx = find(~knownMask);
+        end
+
+        function [packIdx, a0] = initialCompositionLogits(obj, s)
+            unknownIdx = obj.unknownCompositionIndices(s);
+            nUnknown = numel(unknownIdx);
+            if nUnknown <= 1
+                packIdx = [];
+                a0 = [];
+                return;
+            end
+
+            y0 = s.y;
+            if isempty(y0) || any(~isfinite(y0)) || numel(y0) ~= obj.ns
+                y0 = ones(1,obj.ns) / obj.ns;
+            end
+            y0 = max(reshape(y0,1,[]), 0);
+
+            knownMask = obj.compositionKnownMask(s);
+            knownSum = sum(y0(knownMask));
+            remaining = max(1 - knownSum, 0);
+
+            yUnknown = y0(unknownIdx);
+            yUnknown = max(yUnknown, 0);
+            if sum(yUnknown) <= 0
+                yUnknown = ones(1,nUnknown) / nUnknown;
+            else
+                yUnknown = yUnknown / sum(yUnknown);
+            end
+
+            % Represent unknown composition as remaining * softmax(aUnknown).
+            % Pack only first (nUnknown-1) entries and anchor last one to 0.
+            if remaining > 0
+                pUnknown = yUnknown;
+            else
+                pUnknown = ones(1,nUnknown) / nUnknown;
+            end
+
+            aUnknown = log(max(pUnknown,1e-12));
+            anchor = aUnknown(end);
+            aUnknown = aUnknown - anchor;
+
+            packIdx = unknownIdx(1:end-1);
+            a0 = aUnknown(1:end-1).';
+        end
+
+        function y = reconstructComposition(obj, s, packedA)
+            y = s.y;
+            if isempty(y) || any(~isfinite(y)) || numel(y) ~= obj.ns
+                y = ones(obj.ns,1) / obj.ns;
+            end
+            y = reshape(y,[],1);
+
+            knownMask = obj.compositionKnownMask(s);
+            unknownIdx = find(~knownMask);
+            nUnknown = numel(unknownIdx);
+            if nUnknown == 0
+                y = obj.normalizeSimplex(y);
+                obj.warnIfCompositionNotNormalized(s, y);
+                return;
+            end
+
+            knownSum = sum(y(knownMask));
+            remaining = 1 - knownSum;
+
+            if nUnknown == 1
+                y(unknownIdx) = remaining;
+                y = y / sum(y);
+                obj.warnIfCompositionNotNormalized(s, y);
+                return;
+            end
+
+            % softmax() expects only the packed free logits (nUnknown-1).
+            % It appends the anchored final logit internally.
+            aUnknown = zeros(nUnknown-1,1);
+            packIdx = unknownIdx(1:end-1);
+            for j = 1:numel(packIdx)
+                comp = packIdx(j);
+                if isfinite(packedA(comp))
+                    aUnknown(j) = packedA(comp);
+                end
+            end
+
+            % Gauge-fixed softmax: last unknown component is anchored to 0,
+            % so only (nUnknown-1) independent logits are required.
+            y(unknownIdx) = remaining .* obj.softmax(aUnknown);
+            y = y / sum(y);
+            obj.warnIfCompositionNotNormalized(s, y);
         end
 
         function v = safeInit(~,c,fb)
             if isempty(c)||isnan(c), v=fb; else, v=c; end
         end
 
-        function y = softmax(~,a)
-            a=a-max(a); ea=exp(a); y=ea/sum(ea);
+        function y = softmax(~,aPacked)
+            % Reconstruct full logits by anchoring the final component at 0,
+            % then apply stable shift-by-max softmax.
+            aFull = [aPacked(:); 0];
+            aFull = aFull - max(aFull);
+            e = exp(aFull);
+            y = e / sum(e);
         end
 
         function y = normalizeSimplex(~,y)
-            y=max(y,1e-12); y=y/sum(y);
+            y = y(:);
+            s = sum(y);
+            if ~isfinite(s) || s == 0
+                y = ones(numel(y),1) / numel(y);
+            else
+                y = y / s;
+            end
+        end
+
+        function warnIfCompositionNotNormalized(obj, s, y)
+            if obj.debugLevel < 1
+                return
+            end
+            sumY = sum(y);
+            delta = sumY - 1;
+            if isfinite(delta) && abs(delta) > 1e-10
+                fprintf(obj.debugOut, 'WARN composition normalization drift: stream=%s, sum(y)-1=%+.3e\n', ...
+                    string(s.name), delta);
+            end
+        end
+
+        function debugPrintMixerCompositionConsistency(obj, r, dbg, context)
+            [mixer, dominantEq, dominantVal] = obj.findDominantMixer(r);
+            if isempty(mixer)
+                return
+            end
+
+            fprintf(dbg.out, 'Composition normalization + component-flow consistency (%s):\n', context);
+            fprintf(dbg.out, '  Dominant mixer: %s (eq %d, r=%+.3e)\n', string(mixer.describe()), dominantEq, dominantVal);
+
+            streamsToReport = [mixer.inlets(:); {mixer.outlet}];
+            for i = 1:numel(streamsToReport)
+                s = streamsToReport{i};
+                y = s.y(:);
+                sumY = sum(y);
+                minY = min(y);
+                maxY = max(y);
+                compFlowSum = sum(s.n_dot .* y);
+                diffFlow = compFlowSum - s.n_dot;
+                fprintf(dbg.out, '  %s: sum(y)=%.15f (sum(y)-1=%+.3e) min=%.6e max=%.6e\n', ...
+                    string(s.name), sumY, sumY - 1, minY, maxY);
+                fprintf(dbg.out, '      n_dot=%.6e, sum(n_dot*y)=%.6e, diff=%+.3e\n', ...
+                    s.n_dot, compFlowSum, diffFlow);
+            end
+        end
+
+        function [dominantMixer, eqIdx, eqVal] = findDominantMixer(obj, r)
+            dominantMixer = [];
+            eqIdx = NaN;
+            eqVal = NaN;
+            cursor = 1;
+            bestAbs = -Inf;
+            for u = 1:numel(obj.units)
+                unit = obj.units{u};
+                nEq = numel(unit.equations());
+                idx = cursor:(cursor + nEq - 1);
+                if isa(unit, 'proc.units.Mixer') && ~isempty(idx)
+                    [localAbs, localPos] = max(abs(r(idx)));
+                    if isfinite(localAbs) && localAbs > bestAbs
+                        bestAbs = localAbs;
+                        dominantMixer = unit;
+                        eqIdx = idx(localPos);
+                        eqVal = r(eqIdx);
+                    end
+                end
+                cursor = cursor + nEq;
+            end
         end
     end
 end
