@@ -57,8 +57,7 @@ classdef ConversionReactor < handle
                 obj.didWarnNegative = true;
             end
 
-            eqs = [nOutVar - nTarget; obj.outlet.n_dot - sum(nTarget); ...
-                obj.outlet.T - obj.inlet.T; obj.outlet.P - obj.inlet.P];
+            eqs = [nOutVar - nTarget; obj.outlet.T - obj.inlet.T; obj.outlet.P - obj.inlet.P];
         end
 
         function str = describe(obj)

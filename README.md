@@ -181,6 +181,29 @@ For the GUI to support your custom unit, add a dialog method in MathLabApp.m and
 
 ---
 
+
+## Equation Independence Policy (`+proc/+units/*.m`)
+
+MathLab unit equations now follow a repository-wide independence policy:
+
+- Prefer **component molar flow balances** (`n_dot * y_i`) as the primary conserved equations for material units.
+- Avoid enforcing all three at once for the same material relation: component balances, total-flow balance, and composition normalization.
+- Composition normalization belongs to variable parameterization (the solver softmax map), not usually to unit residuals.
+- Keep `T`/`P` equations only when they represent intentional unit physics; avoid adding duplicate pass-through constraints that are just wiring artifacts.
+
+### Examples
+
+- **Independent set (preferred)** for a mixer with `ns` species:
+  - `ns` component balances on outlet `n_dot * y_i`
+  - optional thermal/mechanical model equations (`T`, `P`) if physically intended
+
+- **Redundant set (avoid)** for the same mixer:
+  - `ns` component balances
+  - plus total-flow balance
+  - plus explicit `sum(y)=1` normalization residual
+
+Because stream compositions are packed with a softmax transform in `ProcessSolver`, `sum(y)=1` is already guaranteed by construction.
+
 ## Troubleshooting
 
 | Problem | Likely Cause / Fix |

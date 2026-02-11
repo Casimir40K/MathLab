@@ -13,14 +13,7 @@ classdef Mixer < handle
         function eqs = equations(obj)
             eqs = [];
 
-            % Total molar flow
-            total_n_in = 0;
-            for i = 1:length(obj.inlets)
-                total_n_in = total_n_in + obj.inlets{i}.n_dot;
-            end
-            eqs(end+1) = obj.outlet.n_dot - total_n_in;
-
-            % Species balances
+            % Species balances as primary conserved equations
             nspecies = length(obj.outlet.y);
             for j = 1:nspecies
                 total_species_in = 0;
