@@ -5,6 +5,8 @@ classdef Purge < handle
         purge       % Stream (leaves the process)
         beta        % recycle fraction (0..1)
         mode = "fixed"
+        includeNormalizationConstraints logical = false
+        
     end
 
     methods
@@ -28,9 +30,12 @@ classdef Purge < handle
                           - (1 - b) * obj.inlet.n_dot * obj.inlet.y(i);
             end
 
-            % Mole fraction normalization
-            eqs(end+1) = sum(obj.recycle.y) - 1;
-            eqs(end+1) = sum(obj.purge.y) - 1;
+            % Mole fraction normalization (legacy optional; disabled by default because y uses softmax parameterization)
+            if obj.includeNormalizationConstraints
+                eqs(end+1) = sum(obj.recycle.y) - 1;
+                eqs(end+1) = sum(obj.purge.y) - 1;
+            end
+
 
             % T/P pass-through
             eqs(end+1) = obj.recycle.T - obj.inlet.T;

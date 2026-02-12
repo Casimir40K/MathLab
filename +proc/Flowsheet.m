@@ -3,6 +3,8 @@ classdef Flowsheet < handle
         species   % cellstr species list (global order)
         streams   % cell array of proc.Stream objects
         units     % cell array of unit objects (proc.units.*) with equations()
+        streamDisplayNames % user-visible stream names for reporting (incl. aliases)
+        streamDisplayRefs  % stream object handles aligned with streamDisplayNames
     end
 
     methods
@@ -10,10 +12,22 @@ classdef Flowsheet < handle
             obj.species = species;
             obj.streams = {};
             obj.units   = {};
+            obj.streamDisplayNames = {};
+            obj.streamDisplayRefs  = {};
         end
 
-        function addStream(obj, s)
+        function addStream(obj, s, displayName)
             obj.streams{end+1} = s;
+            if nargin < 3 || isempty(displayName)
+                displayName = char(string(s.name));
+            end
+            obj.streamDisplayNames{end+1} = char(string(displayName));
+            obj.streamDisplayRefs{end+1}  = s;
+        end
+
+        function addAlias(obj, aliasName, s)
+            obj.streamDisplayNames{end+1} = char(string(aliasName));
+            obj.streamDisplayRefs{end+1}  = s;
         end
 
         function addUnit(obj, u)
@@ -75,7 +89,7 @@ classdef Flowsheet < handle
 
         function T = streamTable(obj)
             % Table including: name, n_dot, T, P, y_i, and species molar flows n_i = n_dot*y_i
-            N  = numel(obj.streams);
+            N  = numel(obj.streamDisplayRefs);
             ns = numel(obj.species);
 
             names = strings(N,1);
@@ -86,8 +100,8 @@ classdef Flowsheet < handle
             Ni    = nan(N,ns);
 
             for i = 1:N
-                s = obj.streams{i};
-                names(i) = string(s.name);
+                s = obj.streamDisplayRefs{i};
+                names(i) = string(obj.streamDisplayNames{i});
                 n_dot(i) = s.n_dot;
                 TT(i)    = s.T;
                 PP(i)    = s.P;
@@ -134,15 +148,30 @@ classdef Flowsheet < handle
 
                 % y
                 if hasKnownY(s)
-                    % count unknown components
-                    for j = 1:ns
-                        if ~s.known.y(j)
-                            n = n + 1;
-                        end
+                    nUnknownY = sum(~s.known.y(:));
+                    if nUnknownY > 0
+                        % Gauge fixing for softmax logits: when composition
+                        % has free dimensions, one unknown component can be
+                        % anchored so composition contributes (nUnknownY-1)
+                        % independent unknowns.
+                        n = n + max(nUnknownY - 1, 0);
                     end
                 else
-                    % if no known flags exist, treat full y as unknown (matches softmax approach)
-                    n = n + ns;
+                    % If known.y flags are unavailable/invalid, composition is
+                    % fully free and contributes (ns-1) independent unknowns.
+                    n = n + max(ns - 1, 0);
+                end
+            end
+
+
+            % Unit-level manipulated unknowns (e.g., Adjust blocks)
+            for ui = 1:numel(obj.units)
+                unit = obj.units{ui};
+                if ismethod(unit, 'unknownSpecs')
+                    specs = unit.unknownSpecs();
+                    if ~isempty(specs)
+                        n = n + numel(specs);
+                    end
                 end
             end
 
@@ -250,9 +279,6 @@ classdef Flowsheet < handle
                 end
 
                 ru = unit.equations();
-                if isempty(ru)
-                    error('Unit #%d (%s): equations() returned empty.', u, class(unit));
-                end
                 if any(~isfinite(ru(:)))
                     error('Unit #%d (%s): equations() returned NaN/Inf. Check connectivity/initial guesses.', u, class(unit));
                 end

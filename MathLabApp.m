@@ -307,7 +307,28 @@ classdef MathLabApp < handle
             addRow = uigridlayout(leftG, [1 2], ...
                 'ColumnWidth',{140,'1x'}, 'Padding',[0 0 0 0]);
             app.AddUnitDropDown = uidropdown(addRow, ...
-                'Items',{'Mixer','Link','Reactor','Separator','Purge'},'Value','Mixer');
+                'Items', { ...
+                    'Mixer', ...
+                    'Link', ...
+                    'Reactor', ...
+                    'StoichiometricReactor', ...
+                    'ConversionReactor', ...
+                    'YieldReactor', ...
+                    'EquilibriumReactor', ...
+                    'Separator', ...
+                    'Purge', ...
+                    'Splitter', ...
+                    'Recycle', ...
+                    'Bypass', ...
+                    'Manifold', ...
+                    'Source', ...
+                    'Sink', ...
+                    'DesignSpec', ...
+                    'Adjust', ...
+                    'Calculator', ...
+                    'Constraint' ...
+                }, ...
+                'Value', 'Mixer');
             app.AddUnitBtn = uibutton(addRow,'push','Text','Add Unit...', ...
                 'BackgroundColor',[0.82 0.95 0.82], ...
                 'ButtonPushedFcn',@(~,~) app.addUnitFromUI());
@@ -696,9 +717,18 @@ classdef MathLabApp < handle
         end
 
         function fs = buildFlowsheet(app)
+            [resolvedDefs, aliasByOutlet] = app.resolveIdentityLinks(app.unitDefs);
             fs = proc.Flowsheet(app.speciesNames);
-            for i = 1:numel(app.streams), fs.addStream(app.streams{i}); end
-            for i = 1:numel(app.units),   fs.addUnit(app.units{i}); end
+            for i = 1:numel(app.streams)
+                fs.addStream(app.streams{i});
+            end
+            app.addStreamAliasesToFlowsheet(fs, aliasByOutlet);
+            for i = 1:numel(resolvedDefs)
+                u = app.buildUnitFromDef(resolvedDefs{i}, 'includeIdentityLink', false);
+                if ~isempty(u)
+                    fs.addUnit(u);
+                end
+            end
         end
     end
 
@@ -730,15 +760,36 @@ classdef MathLabApp < handle
         function addUnitFromUI(app)
             typ = app.AddUnitDropDown.Value;
             sNames = app.getStreamNames();
-            if numel(sNames) < 2
-                uialert(app.Fig,'Need at least 2 streams.','Error'); return;
+            needsOne = ismember(typ, {'Source','Sink','DesignSpec','Constraint'});
+            if needsOne
+                if numel(sNames) < 1
+                    uialert(app.Fig,'Need at least 1 stream.','Error'); return;
+                end
+            else
+                if numel(sNames) < 2
+                    uialert(app.Fig,'Need at least 2 streams.','Error'); return;
+                end
             end
             switch typ
                 case 'Link',      app.dialogLink(sNames);
                 case 'Mixer',     app.dialogMixer(sNames);
                 case 'Reactor',   app.dialogReactor(sNames);
+                case 'StoichiometricReactor', app.dialogStoichiometricReactor(sNames);
+                case 'ConversionReactor', app.dialogConversionReactor(sNames);
+                case 'YieldReactor', app.dialogYieldReactor(sNames);
+                case 'EquilibriumReactor', app.dialogEquilibriumReactor(sNames);
                 case 'Separator', app.dialogSeparator(sNames);
                 case 'Purge',     app.dialogPurge(sNames);
+                case 'Splitter',  app.dialogSplitter(sNames);
+                case 'Recycle',   app.dialogRecycle(sNames);
+                case 'Bypass',    app.dialogBypass(sNames);
+                case 'Manifold',  app.dialogManifold(sNames);
+                case 'Source',    app.dialogSource(sNames);
+                case 'Sink',      app.dialogSink(sNames);
+                case 'DesignSpec', app.dialogDesignSpec(sNames);
+                case 'Adjust',    app.dialogAdjust(sNames);
+                case 'Calculator', app.dialogCalculator(sNames);
+                case 'Constraint', app.dialogConstraint(sNames);
             end
         end
 
@@ -749,9 +800,23 @@ classdef MathLabApp < handle
             cn = class(app.units{idx});
             if contains(cn,'Link'),      app.dialogLink(sNames,idx);
             elseif contains(cn,'Mixer'), app.dialogMixer(sNames,idx);
+            elseif contains(cn,'StoichiometricReactor'), app.dialogStoichiometricReactor(sNames,idx);
+            elseif contains(cn,'ConversionReactor'), app.dialogConversionReactor(sNames,idx);
+            elseif contains(cn,'YieldReactor'), app.dialogYieldReactor(sNames,idx);
+            elseif contains(cn,'EquilibriumReactor'), app.dialogEquilibriumReactor(sNames,idx);
             elseif contains(cn,'Reactor'), app.dialogReactor(sNames,idx);
             elseif contains(cn,'Separator'), app.dialogSeparator(sNames,idx);
             elseif contains(cn,'Purge'), app.dialogPurge(sNames,idx);
+            elseif contains(cn,'Splitter'), app.dialogSplitter(sNames,idx);
+            elseif contains(cn,'Recycle'), app.dialogRecycle(sNames,idx);
+            elseif contains(cn,'Bypass'), app.dialogBypass(sNames,idx);
+            elseif contains(cn,'Manifold'), app.dialogManifold(sNames,idx);
+            elseif contains(cn,'Source'), app.dialogSource(sNames,idx);
+            elseif contains(cn,'Sink'), app.dialogSink(sNames,idx);
+            elseif contains(cn,'DesignSpec'), app.dialogDesignSpec(sNames,idx);
+            elseif contains(cn,'Adjust'), app.dialogAdjust(sNames,idx);
+            elseif contains(cn,'Calculator'), app.dialogCalculator(sNames,idx);
+            elseif contains(cn,'Constraint'), app.dialogConstraint(sNames,idx);
             end
         end
 
@@ -825,6 +890,39 @@ classdef MathLabApp < handle
                     src{end+1}=char(string(u.inlet.name)); tgt{end+1}=uName; elbl{end+1}='';
                     src{end+1}=uName; tgt{end+1}=char(string(u.recycle.name)); elbl{end+1}='rec';
                     src{end+1}=uName; tgt{end+1}=char(string(u.purge.name)); elbl{end+1}='pur';
+                elseif contains(cn,'Splitter')
+                    src{end+1}=char(string(u.inlet.name)); tgt{end+1}=uName; elbl{end+1}='';
+                    for k=1:numel(u.outlets)
+                        src{end+1}=uName; tgt{end+1}=char(string(u.outlets{k}.name)); elbl{end+1}=sprintf('out%d',k);
+                    end
+                elseif contains(cn,'Recycle')
+                    src{end+1}=char(string(u.source.name)); tgt{end+1}=uName; elbl{end+1}='src';
+                    src{end+1}=uName; tgt{end+1}=char(string(u.tear.name)); elbl{end+1}='tear';
+                elseif contains(cn,'Bypass')
+                    src{end+1}=char(string(u.inlet.name)); tgt{end+1}=uName; elbl{end+1}='';
+                    src{end+1}=uName; tgt{end+1}=char(string(u.processInlet.name)); elbl{end+1}='proc in';
+                    src{end+1}=uName; tgt{end+1}=char(string(u.bypassStream.name)); elbl{end+1}='bypass';
+                    src{end+1}=char(string(u.processReturn.name)); tgt{end+1}=uName; elbl{end+1}='proc ret';
+                    src{end+1}=uName; tgt{end+1}=char(string(u.outlet.name)); elbl{end+1}='out';
+                elseif contains(cn,'Manifold')
+                    for k=1:numel(u.inlets)
+                        src{end+1}=char(string(u.inlets{k}.name)); tgt{end+1}=uName; elbl{end+1}=sprintf('in%d',k);
+                    end
+                    for k=1:numel(u.outlets)
+                        src{end+1}=uName; tgt{end+1}=char(string(u.outlets{k}.name)); elbl{end+1}=sprintf('out%d',k);
+                    end
+                elseif contains(cn,'Source')
+                    src{end+1}=uName; tgt{end+1}=char(string(u.outlet.name)); elbl{end+1}='out';
+                elseif contains(cn,'Sink')
+                    src{end+1}=char(string(u.inlet.name)); tgt{end+1}=uName; elbl{end+1}='in';
+                elseif contains(cn,'DesignSpec')
+                    src{end+1}=char(string(u.stream.name)); tgt{end+1}=uName; elbl{end+1}=char(string(u.metric));
+                elseif contains(cn,'Adjust')
+                    src{end+1}=char(string(u.targetSpec.stream.name)); tgt{end+1}=uName; elbl{end+1}='spec';
+                elseif contains(cn,'Calculator')
+                    src{end+1}=uName; tgt{end+1}=uName; elbl{end+1}='calc';
+                elseif contains(cn,'Constraint')
+                    src{end+1}=uName; tgt{end+1}=uName; elbl{end+1}='=';
                 end
             end
             if isempty(src), title(ax,'No connections'); return; end
@@ -849,14 +947,42 @@ classdef MathLabApp < handle
                 'Mixer',    [0.20 0.60 0.30], ...
                 'Link',     [0.40 0.40 0.40], ...
                 'Reactor',  [0.85 0.20 0.20], ...
+                'StoichiometricReactor', [0.85 0.20 0.20], ...
+                'ConversionReactor', [0.85 0.20 0.20], ...
+                'YieldReactor', [0.85 0.20 0.20], ...
+                'EquilibriumReactor', [0.85 0.20 0.20], ...
                 'Separator',[0.10 0.40 0.80], ...
-                'Purge',    [0.70 0.40 0.80]);
+                'Purge',    [0.70 0.40 0.80], ...
+                'Splitter', [0.90 0.55 0.10], ...
+                'Recycle',  [0.50 0.50 0.10], ...
+                'Bypass',   [0.10 0.65 0.65], ...
+                'Manifold', [0.35 0.25 0.70], ...
+                'Source',   [0.15 0.55 0.20], ...
+                'Sink',     [0.55 0.15 0.20], ...
+                'DesignSpec',[0.25 0.25 0.85], ...
+                'Adjust',   [0.55 0.20 0.65], ...
+                'Calculator',[0.20 0.55 0.55], ...
+                'Constraint',[0.55 0.55 0.20]);
             unitMarkers = struct( ...
                 'Mixer',    'h', ...  % hexagon
                 'Link',     's', ...  % square
                 'Reactor',  'd', ...  % diamond
+                'StoichiometricReactor', 'd', ...
+                'ConversionReactor', 'd', ...
+                'YieldReactor', 'd', ...
+                'EquilibriumReactor', 'd', ...
                 'Separator','^', ...  % triangle up
-                'Purge',    'v');     % triangle down
+                'Purge',    'v', ...     % triangle down
+                'Splitter', '>', ...
+                'Recycle',  '<', ...
+                'Bypass',   'p', ...
+                'Manifold', 'o', ...
+                'Source',   '>', ...
+                'Sink',     '<', ...
+                'DesignSpec','d', ...
+                'Adjust',   'h', ...
+                'Calculator','p', ...
+                'Constraint','s');
             for i = 1:numel(app.units)
                 uName = sprintf('U%d:%s', i, app.shortTypeName(app.units{i}));
                 uType = app.shortTypeName(app.units{i});
@@ -978,6 +1104,151 @@ classdef MathLabApp < handle
                 def.conversion=efConv.Value; def.reactions=rxn;
                 u=proc.units.Reactor(app.findStream(def.inlet),...
                     app.findStream(def.outlet),rxn,efConv.Value);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogStoichiometricReactor(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            ns = numel(app.speciesNames);
+            [d, ctrls] = app.makeDialog('Configure StoichiometricReactor', 520, 240, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Nu vector:','text',num2str(zeros(1,ns))}, ...
+                 {'Extent mode (fixed/solve):','text','fixed'}, ...
+                 {'Extent (if fixed):','numeric',0}, ...
+                 {'Reference species index:','numeric',1}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=num2str(u.nu.');
+                ctrls{4}.Value=u.extentMode;
+                ctrls{5}.Value=u.extent;
+                ctrls{6}.Value=u.referenceSpecies;
+            elseif numel(sNames)>=2
+                ctrls{2}.Value=sNames{2};
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                nu = str2num(ctrls{3}.Value); %#ok
+                if numel(nu) ~= ns
+                    uialert(d,sprintf('Nu vector must have %d entries.',ns),'Error'); return;
+                end
+                def.type='StoichiometricReactor'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
+                def.nu=nu; def.extentMode=strtrim(lower(ctrls{4}.Value));
+                def.extent=ctrls{5}.Value; def.referenceSpecies=ctrls{6}.Value;
+                u=proc.units.StoichiometricReactor(app.findStream(def.inlet), app.findStream(def.outlet), def.nu, ...
+                    'extent', def.extent, 'extentMode', def.extentMode, 'referenceSpecies', def.referenceSpecies);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogConversionReactor(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            ns = numel(app.speciesNames);
+            [d, ctrls] = app.makeDialog('Configure ConversionReactor', 520, 240, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Nu vector:','text',num2str(zeros(1,ns))}, ...
+                 {'Key species index:','numeric',1}, ...
+                 {'Conversion mode (fixed/solve):','text','fixed'}, ...
+                 {'Conversion X (if fixed):','numeric',0.5}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=num2str(u.nu.');
+                ctrls{4}.Value=u.keySpecies;
+                ctrls{5}.Value=u.conversionMode;
+                ctrls{6}.Value=u.conversion;
+            elseif numel(sNames)>=2
+                ctrls{2}.Value=sNames{2};
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                nu = str2num(ctrls{3}.Value); %#ok
+                if numel(nu) ~= ns
+                    uialert(d,sprintf('Nu vector must have %d entries.',ns),'Error'); return;
+                end
+                def.type='ConversionReactor'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
+                def.nu=nu; def.keySpecies=ctrls{4}.Value;
+                def.conversionMode=strtrim(lower(ctrls{5}.Value)); def.conversion=ctrls{6}.Value;
+                u=proc.units.ConversionReactor(app.findStream(def.inlet), app.findStream(def.outlet), def.nu, ...
+                    def.keySpecies, def.conversion, 'conversionMode', def.conversionMode);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogYieldReactor(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure YieldReactor', 540, 250, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Basis species index (A):','numeric',1}, ...
+                 {'Conversion mode (fixed/solve):','text','fixed'}, ...
+                 {'Conversion X (if fixed):','numeric',0.5}, ...
+                 {'Product species indices:','text','2'}, ...
+                 {'Product yields:','text','1'}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=u.basisSpecies;
+                ctrls{4}.Value=u.conversionMode;
+                ctrls{5}.Value=u.conversion;
+                ctrls{6}.Value=num2str(u.productSpecies(:).');
+                ctrls{7}.Value=num2str(u.productYields(:).');
+            elseif numel(sNames)>=2
+                ctrls{2}.Value=sNames{2};
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                pIdx = str2num(ctrls{6}.Value); %#ok
+                pY = str2num(ctrls{7}.Value); %#ok
+                if numel(pIdx) ~= numel(pY)
+                    uialert(d,'Product indices and yields must have same length.','Error'); return;
+                end
+                def.type='YieldReactor'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
+                def.basisSpecies=ctrls{3}.Value;
+                def.conversionMode=strtrim(lower(ctrls{4}.Value)); def.conversion=ctrls{5}.Value;
+                def.productSpecies=pIdx; def.productYields=pY;
+                u=proc.units.YieldReactor(app.findStream(def.inlet), app.findStream(def.outlet), ...
+                    def.basisSpecies, def.conversion, def.productSpecies, def.productYields, ...
+                    'conversionMode', def.conversionMode);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogEquilibriumReactor(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            ns = numel(app.speciesNames);
+            [d, ctrls] = app.makeDialog('Configure EquilibriumReactor', 520, 230, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Nu vector:','text',num2str(zeros(1,ns))}, ...
+                 {'Equilibrium K:','numeric',1}, ...
+                 {'Reference species index:','numeric',1}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=num2str(u.nu.');
+                ctrls{4}.Value=u.Keq;
+                ctrls{5}.Value=u.referenceSpecies;
+            elseif numel(sNames)>=2
+                ctrls{2}.Value=sNames{2};
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                nu = str2num(ctrls{3}.Value); %#ok
+                if numel(nu) ~= ns
+                    uialert(d,sprintf('Nu vector must have %d entries.',ns),'Error'); return;
+                end
+                def.type='EquilibriumReactor'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
+                def.nu=nu; def.Keq=ctrls{4}.Value; def.referenceSpecies=ctrls{5}.Value;
+                u=proc.units.EquilibriumReactor(app.findStream(def.inlet), app.findStream(def.outlet), ...
+                    def.nu, def.Keq, 'referenceSpecies', def.referenceSpecies);
                 app.commitUnit(u,def,editIdx); delete(d);
             end
         end
@@ -1150,6 +1421,280 @@ classdef MathLabApp < handle
     % =====================================================================
     methods (Access = private)
 
+
+        function dialogSplitter(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Splitter', 520, 220, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlets (comma-sep):','text',strjoin(sNames(1:min(2,end)),', ')}, ...
+                 {'Mode (fractions/flows):','text','fractions'}, ...
+                 {'Values:','text','0.5 0.5'}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                outN=cellfun(@(s)char(string(s.name)),u.outlets,'Uni',false);
+                ctrls{2}.Value=strjoin(outN,', ');
+                if ~isempty(u.splitFractions)
+                    ctrls{3}.Value='fractions';
+                    ctrls{4}.Value=num2str(u.splitFractions);
+                else
+                    ctrls{3}.Value='flows';
+                    ctrls{4}.Value=num2str(u.specifiedOutletFlows);
+                end
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                outNms=strtrim(strsplit(ctrls{2}.Value,','));
+                outS={};
+                for k=1:numel(outNms)
+                    s=app.findStream(outNms{k});
+                    if isempty(s), uialert(d,sprintf('"%s" not found.',outNms{k}),'Error'); return; end
+                    outS{end+1}=s; %#ok
+                end
+                vals=str2num(ctrls{4}.Value); %#ok
+                if numel(vals)~=numel(outS)
+                    uialert(d,'Values length must match number of outlets.','Error'); return;
+                end
+                mode=lower(strtrim(ctrls{3}.Value));
+                def.type='Splitter'; def.inlet=ctrls{1}.Value; def.outlets=outNms;
+                if strcmp(mode,'fractions')
+                    def.splitFractions=vals;
+                    u=proc.units.Splitter(app.findStream(def.inlet),outS,'fractions',vals);
+                else
+                    def.specifiedOutletFlows=vals;
+                    u=proc.units.Splitter(app.findStream(def.inlet),outS,'flows',vals);
+                end
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+
+        function dialogSource(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            ns = numel(app.speciesNames);
+            [d, ctrls] = app.makeDialog('Configure Source', 520, 240, ...
+                {{'Outlet:','dropdown',sNames}, ...
+                 {'Total flow n_dot (NaN=none):','numeric',10}, ...
+                 {sprintf('Composition y (%d vals, NaN skip):',ns),'text',num2str(nan(1,ns))}, ...
+                 {sprintf('Component flows n_i (%d vals, NaN skip):',ns),'text',num2str(nan(1,ns))}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.outlet.name));
+                ctrls{2}.Value=u.totalFlow;
+                ctrls{3}.Value=num2str(u.composition);
+                ctrls{4}.Value=num2str(u.componentFlows);
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def=struct(); def.type='Source'; def.outlet=ctrls{1}.Value;
+                def.totalFlow=ctrls{2}.Value;
+                def.composition=str2num(ctrls{3}.Value); %#ok
+                def.componentFlows=str2num(ctrls{4}.Value); %#ok
+                opts = struct('totalFlow',def.totalFlow,'composition',def.composition,'componentFlows',def.componentFlows);
+                u=proc.units.Source(app.findStream(def.outlet), opts);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogSink(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Sink', 360, 120, ...
+                {{'Inlet:','dropdown',sNames}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx}; ctrls{1}.Value=char(string(u.inlet.name));
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def=struct('type','Sink','inlet',ctrls{1}.Value);
+                u=proc.units.Sink(app.findStream(def.inlet));
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogDesignSpec(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure DesignSpec', 460, 180, ...
+                {{'Stream:','dropdown',sNames}, ...
+                 {'Metric:','dropdown',{'total_flow','comp_flow','mole_fraction'}}, ...
+                 {'Component index:','numeric',1}, ...
+                 {'Target:','numeric',0.5}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.stream.name)); ctrls{2}.Value=u.metric;
+                ctrls{3}.Value=u.componentIndex; ctrls{4}.Value=u.target;
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def=struct('type','DesignSpec','stream',ctrls{1}.Value,'metric',ctrls{2}.Value,...
+                    'componentIndex',ctrls{3}.Value,'target',ctrls{4}.Value);
+                u=proc.units.DesignSpec(app.findStream(def.stream), def.metric, def.target, def.componentIndex);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogAdjust(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Adjust', 520, 210, ...
+                {{'DesignSpec unit index:','numeric',1}, ...
+                 {'Manipulated unit index:','numeric',1}, ...
+                 {'Field name:','text','beta'}, ...
+                 {'Field index (NaN=scalar):','numeric',NaN}, ...
+                 {'Min value:','numeric',0}, ...
+                 {'Max value:','numeric',1}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{3}.Value=u.variableField; ctrls{4}.Value=u.variableIndex;
+                ctrls{5}.Value=u.minValue; ctrls{6}.Value=u.maxValue;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                dsIdx=round(ctrls{1}.Value); muIdx=round(ctrls{2}.Value);
+                if dsIdx<1||dsIdx>numel(app.units) || ~isa(app.units{dsIdx},'proc.units.DesignSpec')
+                    uialert(d,'DesignSpec index must refer to an existing DesignSpec unit.','Error'); return;
+                end
+                if muIdx<1||muIdx>numel(app.units)
+                    uialert(d,'Manipulated unit index invalid.','Error'); return;
+                end
+                def=struct('type','Adjust','designSpecIndex',dsIdx,'ownerIndex',muIdx,'field',ctrls{3}.Value,...
+                    'index',ctrls{4}.Value,'minValue',ctrls{5}.Value,'maxValue',ctrls{6}.Value);
+                u=proc.units.Adjust(app.units{dsIdx}, app.units{muIdx}, def.field, def.index, def.minValue, def.maxValue);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogCalculator(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Calculator', 620, 260, ...
+                {{'LHS stream:','dropdown',sNames},{'LHS field:','dropdown',{'n_dot','T','P'}}, ...
+                 {'A stream:','dropdown',sNames},{'A field:','dropdown',{'n_dot','T','P'}}, ...
+                 {'Operator:','dropdown',{'+' '-' '*' '/'}}, ...
+                 {'B stream:','dropdown',sNames},{'B field:','dropdown',{'n_dot','T','P'}}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.lhsOwner.name)); ctrls{2}.Value=u.lhsField;
+                ctrls{3}.Value=char(string(u.aOwner.name)); ctrls{4}.Value=u.aField;
+                ctrls{5}.Value=u.operator;
+                ctrls{6}.Value=char(string(u.bOwner.name)); ctrls{7}.Value=u.bField;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','Calculator','lhsStream',ctrls{1}.Value,'lhsField',ctrls{2}.Value,...
+                    'aStream',ctrls{3}.Value,'aField',ctrls{4}.Value,'operator',ctrls{5}.Value,...
+                    'bStream',ctrls{6}.Value,'bField',ctrls{7}.Value);
+                u=proc.units.Calculator(app.findStream(def.lhsStream),def.lhsField,...
+                    app.findStream(def.aStream),def.aField,def.operator,...
+                    app.findStream(def.bStream),def.bField);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogConstraint(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Constraint', 460, 170, ...
+                {{'Stream:','dropdown',sNames},{'Field:','dropdown',{'n_dot','T','P'}}, ...
+                 {'Value:','numeric',1},{'Index (NaN=scalar):','numeric',NaN}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.owner.name)); ctrls{2}.Value=u.field;
+                ctrls{3}.Value=u.value; ctrls{4}.Value=u.index;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','Constraint','stream',ctrls{1}.Value,'field',ctrls{2}.Value,...
+                    'value',ctrls{3}.Value,'index',ctrls{4}.Value);
+                u=proc.units.Constraint(app.findStream(def.stream),def.field,def.value,def.index);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogRecycle(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Recycle', 400, 140, ...
+                {{'Source stream:','dropdown',sNames}, {'Tear stream:','dropdown',sNames}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.source.name));
+                ctrls{2}.Value=char(string(u.tear.name));
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def.type='Recycle'; def.source=ctrls{1}.Value; def.tear=ctrls{2}.Value;
+                u=proc.units.Recycle(app.findStream(def.source), app.findStream(def.tear));
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogBypass(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Bypass', 520, 260, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Process inlet stream:','dropdown',sNames}, ...
+                 {'Bypass stream:','dropdown',sNames}, ...
+                 {'Process return stream:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Bypass fraction (0..1):','numeric',0.2}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.processInlet.name));
+                ctrls{3}.Value=char(string(u.bypassStream.name));
+                ctrls{4}.Value=char(string(u.processReturn.name));
+                ctrls{5}.Value=char(string(u.outlet.name));
+                ctrls{6}.Value=u.bypassFraction;
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def.type='Bypass';
+                def.inlet=ctrls{1}.Value; def.processInlet=ctrls{2}.Value;
+                def.bypassStream=ctrls{3}.Value; def.processReturn=ctrls{4}.Value;
+                def.outlet=ctrls{5}.Value; def.bypassFraction=ctrls{6}.Value;
+                u=proc.units.Bypass(app.findStream(def.inlet), app.findStream(def.processInlet), ...
+                    app.findStream(def.bypassStream), app.findStream(def.processReturn), ...
+                    app.findStream(def.outlet), def.bypassFraction);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogManifold(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Manifold', 520, 220, ...
+                {{'Inlets (comma-sep):','text',strjoin(sNames(1:min(2,end)),', ')}, ...
+                 {'Outlets (comma-sep):','text',strjoin(sNames(1:min(2,end)),', ')}, ...
+                 {'Route vector:','text','1 2'}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                inN=cellfun(@(s)char(string(s.name)),u.inlets,'Uni',false);
+                outN=cellfun(@(s)char(string(s.name)),u.outlets,'Uni',false);
+                ctrls{1}.Value=strjoin(inN,', ');
+                ctrls{2}.Value=strjoin(outN,', ');
+                ctrls{3}.Value=num2str(u.route);
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                inNms=strtrim(strsplit(ctrls{1}.Value,','));
+                outNms=strtrim(strsplit(ctrls{2}.Value,','));
+                route=str2num(ctrls{3}.Value); %#ok
+                if numel(route)~=numel(outNms)
+                    uialert(d,'Route length must equal number of outlets.','Error'); return;
+                end
+                inS={}; outS={};
+                for k=1:numel(inNms)
+                    s=app.findStream(inNms{k}); if isempty(s), uialert(d,sprintf('"%s" not found.',inNms{k}),'Error'); return; end
+                    inS{end+1}=s; %#ok
+                end
+                for k=1:numel(outNms)
+                    s=app.findStream(outNms{k}); if isempty(s), uialert(d,sprintf('"%s" not found.',outNms{k}),'Error'); return; end
+                    outS{end+1}=s; %#ok
+                end
+                if any(route < 1) || any(route > numel(inS))
+                    uialert(d,'Route indices must reference inlet list.','Error'); return;
+                end
+                def.type='Manifold'; def.inlets=inNms; def.outlets=outNms; def.route=route;
+                u=proc.units.Manifold(inS,outS,route);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
         function saveConfigDialog(app)
             [file, path] = uiputfile('*.mat', 'Save Config', 'mathlab_config.mat');
             if isequal(file, 0), return; end
@@ -1307,10 +1852,17 @@ classdef MathLabApp < handle
             end
         end
 
-        function u = buildUnitFromDef(app, def)
+        function u = buildUnitFromDef(app, def, varargin)
             u = [];
+            p = inputParser;
+            p.addParameter('includeIdentityLink', true, @(x)islogical(x)&&isscalar(x));
+            p.parse(varargin{:});
+            includeIdentityLink = p.Results.includeIdentityLink;
             switch def.type
                 case 'Link'
+                    if app.isIdentityLinkDef(def) && ~includeIdentityLink
+                        return;
+                    end
                     sIn = app.findStream(def.inlet);
                     sOut = app.findStream(def.outlet);
                     if ~isempty(sIn) && ~isempty(sOut)
@@ -1333,6 +1885,35 @@ classdef MathLabApp < handle
                     if ~isempty(sIn) && ~isempty(sOut)
                         u = proc.units.Reactor(sIn, sOut, def.reactions, def.conversion);
                     end
+                case 'StoichiometricReactor'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.StoichiometricReactor(sIn, sOut, def.nu, ...
+                            'extent', def.extent, 'extentMode', def.extentMode, ...
+                            'referenceSpecies', def.referenceSpecies);
+                    end
+                case 'ConversionReactor'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.ConversionReactor(sIn, sOut, def.nu, def.keySpecies, ...
+                            def.conversion, 'conversionMode', def.conversionMode);
+                    end
+                case 'YieldReactor'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.YieldReactor(sIn, sOut, def.basisSpecies, def.conversion, ...
+                            def.productSpecies, def.productYields, 'conversionMode', def.conversionMode);
+                    end
+                case 'EquilibriumReactor'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.EquilibriumReactor(sIn, sOut, def.nu, def.Keq, ...
+                            'referenceSpecies', def.referenceSpecies);
+                    end
                 case 'Separator'
                     sIn = app.findStream(def.inlet);
                     sA  = app.findStream(def.outletA);
@@ -1346,6 +1927,86 @@ classdef MathLabApp < handle
                     sPur = app.findStream(def.purge);
                     if ~isempty(sIn) && ~isempty(sRec) && ~isempty(sPur)
                         u = proc.units.Purge(sIn, sRec, sPur, def.beta);
+                    end
+                case 'Splitter'
+                    sIn = app.findStream(def.inlet);
+                    outS = {};
+                    for k = 1:numel(def.outlets)
+                        s = app.findStream(def.outlets{k});
+                        if isempty(s), return; end
+                        outS{end+1} = s; %#ok
+                    end
+                    if ~isempty(sIn)
+                        if isfield(def, 'splitFractions')
+                            u = proc.units.Splitter(sIn, outS, 'fractions', def.splitFractions);
+                        else
+                            u = proc.units.Splitter(sIn, outS, 'flows', def.specifiedOutletFlows);
+                        end
+                    end
+                case 'Recycle'
+                    sSrc = app.findStream(def.source);
+                    sTear = app.findStream(def.tear);
+                    if ~isempty(sSrc) && ~isempty(sTear)
+                        u = proc.units.Recycle(sSrc, sTear);
+                    end
+                case 'Bypass'
+                    sIn = app.findStream(def.inlet);
+                    sProcIn = app.findStream(def.processInlet);
+                    sByp = app.findStream(def.bypassStream);
+                    sRet = app.findStream(def.processReturn);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sProcIn) && ~isempty(sByp) && ~isempty(sRet) && ~isempty(sOut)
+                        u = proc.units.Bypass(sIn, sProcIn, sByp, sRet, sOut, def.bypassFraction);
+                    end
+                case 'Manifold'
+                    inS = {};
+                    for k = 1:numel(def.inlets)
+                        s = app.findStream(def.inlets{k});
+                        if isempty(s), return; end
+                        inS{end+1} = s; %#ok
+                    end
+                    outS = {};
+                    for k = 1:numel(def.outlets)
+                        s = app.findStream(def.outlets{k});
+                        if isempty(s), return; end
+                        outS{end+1} = s; %#ok
+                    end
+                    u = proc.units.Manifold(inS, outS, def.route);
+                case 'Source'
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sOut)
+                        opts = struct();
+                        if isfield(def,'totalFlow'), opts.totalFlow = def.totalFlow; end
+                        if isfield(def,'composition'), opts.composition = def.composition; end
+                        if isfield(def,'componentFlows'), opts.componentFlows = def.componentFlows; end
+                        u = proc.units.Source(sOut, opts);
+                    end
+                case 'Sink'
+                    sIn = app.findStream(def.inlet);
+                    if ~isempty(sIn), u = proc.units.Sink(sIn); end
+                case 'DesignSpec'
+                    s = app.findStream(def.stream);
+                    if ~isempty(s)
+                        u = proc.units.DesignSpec(s, def.metric, def.target, def.componentIndex);
+                    end
+                case 'Adjust'
+                    if isfield(def,'designSpecIndex') && isfield(def,'ownerIndex') && ...
+                            def.designSpecIndex <= numel(app.units) && def.ownerIndex <= numel(app.units)
+                        ds = app.units{def.designSpecIndex};
+                        owner = app.units{def.ownerIndex};
+                        u = proc.units.Adjust(ds, owner, def.field, def.index, def.minValue, def.maxValue);
+                    end
+                case 'Calculator'
+                    lhs = app.findStream(def.lhsStream);
+                    a = app.findStream(def.aStream);
+                    b = app.findStream(def.bStream);
+                    if ~isempty(lhs) && ~isempty(a) && ~isempty(b)
+                        u = proc.units.Calculator(lhs, def.lhsField, a, def.aField, def.operator, b, def.bField);
+                    end
+                case 'Constraint'
+                    s = app.findStream(def.stream);
+                    if ~isempty(s)
+                        u = proc.units.Constraint(s, def.field, def.value, def.index);
                     end
             end
         end
@@ -1392,7 +2053,13 @@ classdef MathLabApp < handle
                     def = cfg.unitDefs{i};
                     switch def.type
                         case 'Link'
-                            fprintf(fid, 'fs.addUnit(proc.units.Link(%s, %s));\n', def.inlet, def.outlet);
+                            isIdentityLink = ~(isfield(def, 'mode') && ~strcmp(def.mode, 'identity'));
+                            if isfield(def, 'isIdentity')
+                                isIdentityLink = logical(def.isIdentity);
+                            end
+                            if ~isIdentityLink
+                                fprintf(fid, 'fs.addUnit(proc.units.Link(%s, %s));\n', def.inlet, def.outlet);
+                            end
                         case 'Mixer'
                             inStr = strjoin(cellfun(@(n) n, def.inlets, 'Uni',false), ', ');
                             fprintf(fid, 'fs.addUnit(proc.units.Mixer({%s}, %s));\n', inStr, def.outlet);
@@ -1403,12 +2070,58 @@ classdef MathLabApp < handle
                             fprintf(fid, 'rxn.name = "%s";\n', def.reactions.name);
                             fprintf(fid, 'fs.addUnit(proc.units.Reactor(%s, %s, rxn, %.4g));\n', ...
                                 def.inlet, def.outlet, def.conversion);
+                        case 'StoichiometricReactor'
+                            fprintf(fid, 'fs.addUnit(proc.units.StoichiometricReactor(%s, %s, %s, ''extent'', %.6g, ''extentMode'', ''%s'', ''referenceSpecies'', %d));\n', ...
+                                def.inlet, def.outlet, mat2str(def.nu), def.extent, def.extentMode, def.referenceSpecies);
+                        case 'ConversionReactor'
+                            fprintf(fid, 'fs.addUnit(proc.units.ConversionReactor(%s, %s, %s, %d, %.6g, ''conversionMode'', ''%s''));\n', ...
+                                def.inlet, def.outlet, mat2str(def.nu), def.keySpecies, def.conversion, def.conversionMode);
+                        case 'YieldReactor'
+                            fprintf(fid, 'fs.addUnit(proc.units.YieldReactor(%s, %s, %d, %.6g, %s, %s, ''conversionMode'', ''%s''));\n', ...
+                                def.inlet, def.outlet, def.basisSpecies, def.conversion, mat2str(def.productSpecies), mat2str(def.productYields), def.conversionMode);
+                        case 'EquilibriumReactor'
+                            fprintf(fid, 'fs.addUnit(proc.units.EquilibriumReactor(%s, %s, %s, %.6g, ''referenceSpecies'', %d));\n', ...
+                                def.inlet, def.outlet, mat2str(def.nu), def.Keq, def.referenceSpecies);
                         case 'Separator'
                             fprintf(fid, 'fs.addUnit(proc.units.Separator(%s, %s, %s, %s));\n', ...
                                 def.inlet, def.outletA, def.outletB, mat2str(def.phi,6));
                         case 'Purge'
                             fprintf(fid, 'fs.addUnit(proc.units.Purge(%s, %s, %s, %.4g));\n', ...
                                 def.inlet, def.recycle, def.purge, def.beta);
+                        case 'Splitter'
+                            outStr = strjoin(cellfun(@(n) n, def.outlets, 'Uni',false), ', ');
+                            if isfield(def, 'splitFractions')
+                                fprintf(fid, 'fs.addUnit(proc.units.Splitter(%s, {%s}, ''fractions'', %s));\n', ...
+                                    def.inlet, outStr, mat2str(def.splitFractions,6));
+                            else
+                                fprintf(fid, 'fs.addUnit(proc.units.Splitter(%s, {%s}, ''flows'', %s));\n', ...
+                                    def.inlet, outStr, mat2str(def.specifiedOutletFlows,6));
+                            end
+                        case 'Recycle'
+                            fprintf(fid, 'fs.addUnit(proc.units.Recycle(%s, %s));\n', def.source, def.tear);
+                        case 'Bypass'
+                            fprintf(fid, 'fs.addUnit(proc.units.Bypass(%s, %s, %s, %s, %s, %.4g));\n', ...
+                                def.inlet, def.processInlet, def.bypassStream, def.processReturn, def.outlet, def.bypassFraction);
+                        case 'Manifold'
+                            inStr = strjoin(cellfun(@(n) n, def.inlets, 'Uni',false), ', ');
+                            outStr = strjoin(cellfun(@(n) n, def.outlets, 'Uni',false), ', ');
+                            fprintf(fid, 'fs.addUnit(proc.units.Manifold({%s}, {%s}, %s));\n', ...
+                                inStr, outStr, mat2str(def.route));
+                        case 'Source'
+                            fprintf(fid, 'srcOpts = struct(''totalFlow'', %.6g, ''composition'', %s, ''componentFlows'', %s);\n', ...
+                                def.totalFlow, mat2str(def.composition,6), mat2str(def.componentFlows,6));
+                            fprintf(fid, 'fs.addUnit(proc.units.Source(%s, srcOpts));\n', def.outlet);
+                        case 'Sink'
+                            fprintf(fid, 'fs.addUnit(proc.units.Sink(%s));\n', def.inlet);
+                        case 'DesignSpec'
+                            fprintf(fid, 'fs.addUnit(proc.units.DesignSpec(%s, ''%s'', %.6g, %d));\n', ...
+                                def.stream, def.metric, def.target, def.componentIndex);
+                        case 'Calculator'
+                            fprintf(fid, 'fs.addUnit(proc.units.Calculator(%s, ''%s'', %s, ''%s'', ''%s'', %s, ''%s''));\n', ...
+                                def.lhsStream, def.lhsField, def.aStream, def.aField, def.operator, def.bStream, def.bField);
+                        case 'Constraint'
+                            fprintf(fid, 'fs.addUnit(proc.units.Constraint(%s, ''%s'', %.6g, %.6g));\n', ...
+                                def.stream, def.field, def.value, def.index);
                     end
                 end
             end
@@ -1623,6 +2336,85 @@ classdef MathLabApp < handle
     %  HELPERS
     % =====================================================================
     methods (Access = private)
+        function [resolvedDefs, aliasByOutlet] = resolveIdentityLinks(app, unitDefs)
+            aliasByOutlet = containers.Map('KeyType','char','ValueType','char');
+            resolvedDefs = cell(size(unitDefs));
+            for i = 1:numel(unitDefs)
+                def = unitDefs{i};
+                if ~isstruct(def)
+                    resolvedDefs{i} = def;
+                    continue;
+                end
+                def = app.rewriteDefStreams(def, aliasByOutlet);
+                if strcmp(def.type, 'Link') && app.isIdentityLinkDef(def)
+                    inletRoot = app.resolveAliasName(def.inlet, aliasByOutlet);
+                    aliasByOutlet(char(def.outlet)) = inletRoot;
+                    continue;
+                end
+                resolvedDefs{i} = def;
+            end
+            resolvedDefs = resolvedDefs(~cellfun(@isempty, resolvedDefs));
+        end
+
+        function def = rewriteDefStreams(app, def, aliasByOutlet)
+            fnSingles = {'inlet','source','stream','tear','processInlet','bypassStream','processReturn', ...
+                'lhsStream','aStream','bStream','recycle','purge','outlet','outletA','outletB'};
+            for i = 1:numel(fnSingles)
+                f = fnSingles{i};
+                if ~isfield(def, f)
+                    continue;
+                end
+                if strcmp(f, 'outlet') && strcmp(def.type, 'Link') && app.isIdentityLinkDef(def)
+                    continue;
+                end
+                def.(f) = app.resolveAliasName(def.(f), aliasByOutlet);
+            end
+            if isfield(def, 'inlets')
+                for k = 1:numel(def.inlets)
+                    def.inlets{k} = app.resolveAliasName(def.inlets{k}, aliasByOutlet);
+                end
+            end
+            if isfield(def, 'outlets')
+                for k = 1:numel(def.outlets)
+                    def.outlets{k} = app.resolveAliasName(def.outlets{k}, aliasByOutlet);
+                end
+            end
+        end
+
+        function addStreamAliasesToFlowsheet(app, fs, aliasByOutlet)
+            if isempty(aliasByOutlet)
+                return;
+            end
+            keys = aliasByOutlet.keys;
+            for i = 1:numel(keys)
+                aliasName = keys{i};
+                targetName = aliasByOutlet(aliasName);
+                s = app.findStream(targetName);
+                if ~isempty(s)
+                    fs.addAlias(aliasName, s);
+                end
+            end
+        end
+
+        function tf = isIdentityLinkDef(~, def)
+            tf = strcmp(def.type, 'Link') && ~(isfield(def, 'mode') && ~strcmp(def.mode, 'identity'));
+            if isfield(def, 'isIdentity')
+                tf = logical(def.isIdentity);
+            end
+        end
+
+        function outName = resolveAliasName(~, name, aliasByOutlet)
+            outName = char(string(name));
+            visited = containers.Map('KeyType','char','ValueType','logical');
+            while isKey(aliasByOutlet, outName)
+                if isKey(visited, outName)
+                    break;
+                end
+                visited(outName) = true;
+                outName = aliasByOutlet(outName);
+            end
+        end
+
         function names = getStreamNames(app)
             names = cellfun(@(s) char(string(s.name)), app.streams, 'Uni', false);
         end
