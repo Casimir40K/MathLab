@@ -281,9 +281,69 @@ function u = buildUnitFromDef(def, streams)
             if ~isempty(s)
                 u = proc.units.Constraint(s, def.field, def.value, def.index);
             end
+        case 'Compressor'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                mix = buildThermoMix(cfg);
+                args = {};
+                if isfield(def,'Pout'), args = [args, {'Pout', def.Pout}]; end
+                if isfield(def,'PR'), args = [args, {'PR', def.PR}]; end
+                if isfield(def,'eta'), args = [args, {'eta', def.eta}]; end
+                u = proc.units.Compressor(sIn, sOut, mix, args{:});
+            end
+        case 'Turbine'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                mix = buildThermoMix(cfg);
+                args = {};
+                if isfield(def,'Pout'), args = [args, {'Pout', def.Pout}]; end
+                if isfield(def,'PR'), args = [args, {'PR', def.PR}]; end
+                if isfield(def,'eta'), args = [args, {'eta', def.eta}]; end
+                u = proc.units.Turbine(sIn, sOut, mix, args{:});
+            end
+        case 'Heater'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                mix = buildThermoMix(cfg);
+                args = {};
+                if isfield(def,'Tout'), args = [args, {'Tout', def.Tout}]; end
+                if isfield(def,'duty'), args = [args, {'duty', def.duty}]; end
+                u = proc.units.Heater(sIn, sOut, mix, args{:});
+            end
+        case 'Cooler'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                mix = buildThermoMix(cfg);
+                args = {};
+                if isfield(def,'Tout'), args = [args, {'Tout', def.Tout}]; end
+                if isfield(def,'duty'), args = [args, {'duty', def.duty}]; end
+                u = proc.units.Cooler(sIn, sOut, mix, args{:});
+            end
+        case 'HeatExchanger'
+            hIn = findS(def.hotInlet, streams);
+            hOut = findS(def.hotOutlet, streams);
+            cIn = findS(def.coldInlet, streams);
+            cOut = findS(def.coldOutlet, streams);
+            if ~isempty(hIn) && ~isempty(hOut) && ~isempty(cIn) && ~isempty(cOut)
+                mix = buildThermoMix(cfg);
+                args = {};
+                if isfield(def,'Th_out'), args = [args, {'Th_out', def.Th_out}]; end
+                if isfield(def,'Tc_out'), args = [args, {'Tc_out', def.Tc_out}]; end
+                if isfield(def,'duty'), args = [args, {'duty', def.duty}]; end
+                u = proc.units.HeatExchanger(hIn, hOut, cIn, cOut, mix, args{:});
+            end
     end
 end
 
+function mix = buildThermoMix(cfg)
+    %BUILDTHERMOMIX Create IdealGasMixture from config species names.
+    lib = thermo.ThermoLibrary();
+    mix = thermo.IdealGasMixture(cfg.speciesNames, lib);
+end
 
 function [resolvedDefs, aliasByOutlet] = resolveIdentityLinks(unitDefs)
     aliasByOutlet = containers.Map('KeyType','char','ValueType','char');

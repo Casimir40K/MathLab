@@ -24,6 +24,12 @@ function summary = run_regression_suite(varargin)
         @testMassOnlyReactorVariants
         @testTopologyUnits
         @testSourceSinkDesignSpecAdjustCalculatorConstraint
+        @testThermoShomateSpecies
+        @testThermoIdealGasMixture
+        @testCompressorSolve
+        @testTurbineSolve
+        @testHeaterCoolerSolve
+        @testHeatExchangerSolve
     };
 
     n = numel(tests);
@@ -365,4 +371,308 @@ end
 function assertNearZero(values, tol, msg)
     maxAbs = max(abs(values(:)));
     assert(maxAbs < tol, '%s (max|res|=%.3e, tol=%.3e)', msg, maxAbs, tol);
+end
+
+% =========================================================================
+% THERMODYNAMICS TESTS
+% =========================================================================
+
+function testThermoShomateSpecies()
+    lib = thermo.ThermoLibrary();
+
+    % --- N2 at 500 K: cp should be ~29.1 J/(mol*K) = 29.1 kJ/(kmol*K) ---
+    n2 = lib.get('N2');
+    cp500 = n2.cp_molar(500);
+    assert(abs(cp500 - 29.13) < 0.5, ...
+        'N2 cp(500K) expected ~29.1, got %.2f', cp500);
+
+    % --- N2 sensible enthalpy at 298.15 K should be ~0 ---
+    h298 = n2.h_sensible(298.15);
+    assert(abs(h298) < 0.1, 'N2 h_sensible(298.15) should be ~0, got %.4f', h298);
+
+    % --- N2 sensible enthalpy at 1000 K: ~21.46 kJ/mol = 21460 kJ/kmol ---
+    h1000 = n2.h_sensible(1000);
+    assert(abs(h1000 - 21460) < 300, ...
+        'N2 h_sensible(1000K) expected ~21460, got %.1f', h1000);
+
+    % --- Ar cp should be ~20.786 (monatomic, 5/2 R) ---
+    ar = lib.get('Ar');
+    cpAr = ar.cp_molar(500);
+    assert(abs(cpAr - 20.786) < 0.1, ...
+        'Ar cp(500K) expected ~20.786, got %.3f', cpAr);
+
+    % --- H2O(g) formation enthalpy ---
+    h2o = lib.get('H2O');
+    assert(abs(h2o.Hf298_kJkmol - (-241826)) < 100, ...
+        'H2O Hf298 expected ~-241826, got %.1f', h2o.Hf298_kJkmol);
+
+    % --- CO2 at 1000 K: cp ~54.3 J/(mol*K) ---
+    co2 = lib.get('CO2');
+    cpCO2 = co2.cp_molar(1000);
+    assert(abs(cpCO2 - 54.3) < 1.0, ...
+        'CO2 cp(1000K) expected ~54.3, got %.2f', cpCO2);
+end
+
+function testThermoIdealGasMixture()
+    lib = thermo.ThermoLibrary();
+    species = {'N2', 'O2'};
+    mix = thermo.IdealGasMixture(species, lib);
+
+    z = [0.79, 0.21];  % air-like
+
+    % cp of air at 300 K: ~29.1 kJ/(kmol*K)
+    cpAir = mix.cp_mix(300, z);
+    assert(cpAir > 28 && cpAir < 31, ...
+        'Air cp(300K) expected ~29, got %.2f', cpAir);
+
+    % Sensible enthalpy at Tref should be ~0
+    h298 = mix.h_mix_sensible(298.15, z);
+    assert(abs(h298) < 0.5, 'Air h(298.15) should be ~0, got %.4f', h298);
+
+    % gamma of air at 300 K: ~1.4
+    gam = mix.gamma_mix(300, z);
+    assert(abs(gam - 1.4) < 0.02, ...
+        'Air gamma(300K) expected ~1.4, got %.3f', gam);
+
+    % MW of air: ~28.85
+    mw = mix.MW_mix(z);
+    assert(abs(mw - 28.85) < 0.2, ...
+        'Air MW expected ~28.85, got %.2f', mw);
+
+    % Entropy increases with temperature at constant P
+    s300 = mix.s_mix(300, 1e5, z);
+    s500 = mix.s_mix(500, 1e5, z);
+    assert(s500 > s300, 'Entropy should increase with T');
+
+    % Entropy decreases with pressure at constant T
+    s1bar = mix.s_mix(300, 1e5, z);
+    s10bar = mix.s_mix(300, 1e6, z);
+    assert(s1bar > s10bar, 'Entropy should decrease with P');
+
+    % Inverse solver: T from h
+    h_target = mix.h_mix_sensible(800, z);
+    T_solved = mix.solveT_from_h(h_target, z, 500);
+    assert(abs(T_solved - 800) < 0.1, ...
+        'solveT_from_h: expected 800, got %.2f', T_solved);
+
+    % Inverse solver: T from s (isentropic)
+    s_target = mix.s_mix(500, 1e5, z);
+    T_isen = mix.solveT_isentropic(s_target, 2e5, z, 500);
+    % At 2x pressure, isentropic T should be > 500
+    assert(T_isen > 500, 'Isentropic compression should raise T');
+    % Check the entropy actually matches
+    s_check = mix.s_mix(T_isen, 2e5, z);
+    assert(abs(s_check - s_target) < 1e-6, ...
+        'solveT_isentropic entropy mismatch: %.6e', abs(s_check - s_target));
+end
+
+function testCompressorSolve()
+    lib = thermo.ThermoLibrary();
+    species = {'N2', 'O2'};
+    mix = thermo.IdealGasMixture(species, lib);
+
+    fs = proc.Flowsheet(species);
+
+    % Inlet: fully specified
+    S1 = proc.Stream('S1', species);
+    S1.setKnown('n_dot', 1.0);
+    S1.setKnown('T', 300);
+    S1.setKnown('P', 1e5);
+    S1.setKnown('y', [0.79, 0.21]);
+
+    % Outlet: only guesses, everything unknown (solver finds n_dot, y, T, P)
+    S2 = proc.Stream('S2', species);
+    S2.setGuess(1.0, [0.79 0.21], 450, 3e5);
+
+    fs.addStream(S1);
+    fs.addStream(S2);
+
+    comp = proc.units.Compressor(S1, S2, mix, 'Pout', 3e5, 'eta', 0.85);
+    fs.addUnit(comp);
+
+    % DOF: S1 has 0 unknowns. S2 has n_dot(1) + y(ns-1=1) + T(1) + P(1) = 4.
+    % Compressor gives ns+2 = 4 equations. Square!
+    [nU, nE] = fs.checkDOF('quiet', true);
+    assert(nU == nE, 'Compressor DOF not square: %d unknowns, %d eqs', nU, nE);
+
+    solver = fs.solve('maxIter', 100, 'tolAbs', 1e-9, 'printToConsole', false);
+    assert(solver.residualHistory(end) < solver.tolAbs, ...
+        'Compressor did not converge: ||r||=%.3e', solver.residualHistory(end));
+
+    % Check outlet pressure
+    assert(abs(S2.P - 3e5) < 1, 'Outlet P should be 3e5, got %.1f', S2.P);
+
+    % Outlet T should be > inlet T (compression heats gas)
+    assert(S2.T > S1.T, 'Compressor outlet T should be > inlet T');
+
+    % Composition should be preserved (pass-through)
+    assert(abs(S2.y(1) - 0.79) < 1e-3, 'Compressor should preserve y(1)');
+    assert(abs(S2.y(2) - 0.21) < 1e-3, 'Compressor should preserve y(2)');
+
+    % Rough check: for ideal gas with k~1.4, T2s/T1 = (P2/P1)^((k-1)/k)
+    k = mix.gamma_mix(300, [0.79 0.21]);
+    T2s_approx = 300 * (3)^((k-1)/k);
+    T2_approx = 300 + (T2s_approx - 300) / 0.85;
+    assert(abs(S2.T - T2_approx) < 5, ...
+        'Compressor T2 expected ~%.1f, got %.1f', T2_approx, S2.T);
+
+    % Power check
+    W = comp.getPower();
+    assert(W > 0, 'Compressor power should be positive (consumed)');
+end
+
+function testTurbineSolve()
+    lib = thermo.ThermoLibrary();
+    species = {'N2', 'O2'};
+    mix = thermo.IdealGasMixture(species, lib);
+
+    fs = proc.Flowsheet(species);
+
+    S1 = proc.Stream('S1', species);
+    S1.setKnown('n_dot', 1.0);
+    S1.setKnown('T', 800);
+    S1.setKnown('P', 5e5);
+    S1.setKnown('y', [0.79, 0.21]);
+
+    S2 = proc.Stream('S2', species);
+    S2.setGuess(1.0, [0.79 0.21], 600, 1e5);
+
+    fs.addStream(S1);
+    fs.addStream(S2);
+
+    turb = proc.units.Turbine(S1, S2, mix, 'Pout', 1e5, 'eta', 0.90);
+    fs.addUnit(turb);
+
+    [nU, nE] = fs.checkDOF('quiet', true);
+    assert(nU == nE, 'Turbine DOF not square: %d unknowns, %d eqs', nU, nE);
+
+    solver = fs.solve('maxIter', 100, 'tolAbs', 1e-9, 'printToConsole', false);
+    assert(solver.residualHistory(end) < solver.tolAbs, ...
+        'Turbine did not converge: ||r||=%.3e', solver.residualHistory(end));
+
+    assert(abs(S2.P - 1e5) < 1, 'Turbine outlet P should be 1e5');
+    assert(S2.T < S1.T, 'Turbine outlet T should be < inlet T');
+
+    W = turb.getPower();
+    assert(W > 0, 'Turbine power should be positive (produced)');
+end
+
+function testHeaterCoolerSolve()
+    lib = thermo.ThermoLibrary();
+    species = {'N2', 'O2'};
+    mix = thermo.IdealGasMixture(species, lib);
+
+    % --- Heater with specified Tout ---
+    fs = proc.Flowsheet(species);
+
+    S1 = proc.Stream('S1', species);
+    S1.setKnown('n_dot', 2.0);
+    S1.setKnown('T', 300);
+    S1.setKnown('P', 1e5);
+    S1.setKnown('y', [0.79, 0.21]);
+
+    S2 = proc.Stream('S2', species);
+    S2.setGuess(2.0, [0.79 0.21], 500, 1e5);
+
+    fs.addStream(S1); fs.addStream(S2);
+    heater = proc.units.Heater(S1, S2, mix, 'Tout', 500);
+    fs.addUnit(heater);
+
+    [nU, nE] = fs.checkDOF('quiet', true);
+    assert(nU == nE, 'Heater DOF not square: %d unknowns, %d eqs', nU, nE);
+
+    solver = fs.solve('maxIter', 60, 'tolAbs', 1e-9, 'printToConsole', false);
+    assert(solver.residualHistory(end) < solver.tolAbs, ...
+        'Heater did not converge: ||r||=%.3e', solver.residualHistory(end));
+    assert(abs(S2.T - 500) < 0.01, 'Heater Tout should be 500');
+    assert(abs(S2.P - 1e5) < 1, 'Heater should preserve P');
+
+    Q_heater = heater.getDuty();
+    assert(Q_heater > 0, 'Heater duty should be positive');
+
+    % --- Cooler with specified duty (negative Q) ---
+    fs2 = proc.Flowsheet(species);
+
+    S3 = proc.Stream('S3', species);
+    S3.setKnown('n_dot', 2.0);
+    S3.setKnown('T', 500);
+    S3.setKnown('P', 1e5);
+    S3.setKnown('y', [0.79, 0.21]);
+
+    S4 = proc.Stream('S4', species);
+    S4.setGuess(2.0, [0.79 0.21], 400, 1e5);
+
+    fs2.addStream(S3); fs2.addStream(S4);
+    cooler = proc.units.Cooler(S3, S4, mix, 'duty', -Q_heater);
+    fs2.addUnit(cooler);
+
+    solver2 = fs2.solve('maxIter', 60, 'tolAbs', 1e-9, 'printToConsole', false);
+    assert(solver2.residualHistory(end) < solver2.tolAbs, ...
+        'Cooler did not converge: ||r||=%.3e', solver2.residualHistory(end));
+
+    % Cooler with same magnitude duty should bring T back to ~300 K
+    assert(abs(S4.T - 300) < 1.0, ...
+        'Cooler with reversed heater duty should give T~300, got %.1f', S4.T);
+end
+
+function testHeatExchangerSolve()
+    lib = thermo.ThermoLibrary();
+    species = {'N2', 'O2'};
+    mix = thermo.IdealGasMixture(species, lib);
+
+    fs = proc.Flowsheet(species);
+
+    % Hot side: 800 K -> cool down
+    Sh_in = proc.Stream('Sh_in', species);
+    Sh_in.setKnown('n_dot', 1.0);
+    Sh_in.setKnown('T', 800);
+    Sh_in.setKnown('P', 1e5);
+    Sh_in.setKnown('y', [0.79, 0.21]);
+
+    Sh_out = proc.Stream('Sh_out', species);
+    Sh_out.setGuess(1.0, [0.79 0.21], 500, 1e5);
+
+    % Cold side: 300 K -> heat up
+    Sc_in = proc.Stream('Sc_in', species);
+    Sc_in.setKnown('n_dot', 1.5);
+    Sc_in.setKnown('T', 300);
+    Sc_in.setKnown('P', 2e5);
+    Sc_in.setKnown('y', [0.79, 0.21]);
+
+    Sc_out = proc.Stream('Sc_out', species);
+    Sc_out.setGuess(1.5, [0.79 0.21], 500, 2e5);
+
+    fs.addStream(Sh_in); fs.addStream(Sh_out);
+    fs.addStream(Sc_in); fs.addStream(Sc_out);
+
+    % DOF: Sh_in, Sc_in fully known (0+0 unknowns).
+    % Sh_out: n_dot(1) + y(1) + T(1) + P(1) = 4.
+    % Sc_out: n_dot(1) + y(1) + T(1) + P(1) = 4.
+    % Total unknowns = 8. HX gives 2*ns+4 = 2*2+4 = 8 equations. Square!
+    hx = proc.units.HeatExchanger(Sh_in, Sh_out, Sc_in, Sc_out, mix, ...
+        'Th_out', 500);
+    fs.addUnit(hx);
+
+    [nU, nE] = fs.checkDOF('quiet', true);
+    assert(nU == nE, 'HX DOF not square: %d unknowns, %d eqs', nU, nE);
+
+    solver = fs.solve('maxIter', 100, 'tolAbs', 1e-9, 'printToConsole', false);
+    assert(solver.residualHistory(end) < solver.tolAbs, ...
+        'HX did not converge: ||r||=%.3e', solver.residualHistory(end));
+
+    assert(abs(Sh_out.T - 500) < 0.1, 'HX hot outlet should be 500 K');
+    assert(abs(Sh_out.P - 1e5) < 1, 'HX hot side P should be preserved');
+    assert(abs(Sc_out.P - 2e5) < 1, 'HX cold side P should be preserved');
+    assert(Sc_out.T > 300, 'HX cold outlet should be heated');
+
+    % Energy balance check: Q_hot = Q_cold
+    z = [0.79, 0.21];
+    h_h_in  = mix.h_mix_sensible(Sh_in.T,  z);
+    h_h_out = mix.h_mix_sensible(Sh_out.T, z);
+    h_c_in  = mix.h_mix_sensible(Sc_in.T,  z);
+    h_c_out = mix.h_mix_sensible(Sc_out.T, z);
+    Q_hot  = Sh_in.n_dot  * (h_h_in - h_h_out);
+    Q_cold = Sc_in.n_dot * (h_c_out - h_c_in);
+    assert(abs(Q_hot - Q_cold) < 1e-4, ...
+        'HX energy balance violated: Q_hot=%.4f, Q_cold=%.4f', Q_hot, Q_cold);
 end
