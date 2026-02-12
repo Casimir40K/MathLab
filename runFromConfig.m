@@ -56,7 +56,7 @@ function [T, solver] = runFromConfig(configFile, varargin)
     units = {};
     for i = 1:numel(resolvedDefs)
         def = resolvedDefs{i};
-        u = buildUnitFromDef(def, streams);
+        u = buildUnitFromDef(def, streams, cfg.speciesNames, units);
         if ~isempty(u)
             units{end+1} = u; %#ok
         else
@@ -131,7 +131,8 @@ function [T, solver] = runFromConfig(configFile, varargin)
 end
 
 % =========================================================================
-function u = buildUnitFromDef(def, streams)
+function u = buildUnitFromDef(def, streams, speciesNames, existingUnits)
+    if nargin < 4, existingUnits = {}; end
     u = [];
     switch def.type
         case 'Link'
@@ -264,9 +265,9 @@ function u = buildUnitFromDef(def, streams)
             end
         case 'Adjust'
             if isfield(def,'designSpecIndex') && isfield(def,'ownerIndex') && ...
-                    def.designSpecIndex <= numel(units) && def.ownerIndex <= numel(units)
-                ds = units{def.designSpecIndex};
-                owner = units{def.ownerIndex};
+                    def.designSpecIndex <= numel(existingUnits) && def.ownerIndex <= numel(existingUnits)
+                ds = existingUnits{def.designSpecIndex};
+                owner = existingUnits{def.ownerIndex};
                 u = proc.units.Adjust(ds, owner, def.field, def.index, def.minValue, def.maxValue);
             end
         case 'Calculator'
@@ -285,7 +286,7 @@ function u = buildUnitFromDef(def, streams)
             sIn = findS(def.inlet, streams);
             sOut = findS(def.outlet, streams);
             if ~isempty(sIn) && ~isempty(sOut)
-                mix = buildThermoMix(cfg);
+                mix = buildThermoMix(speciesNames);
                 args = {};
                 if isfield(def,'Pout'), args = [args, {'Pout', def.Pout}]; end
                 if isfield(def,'PR'), args = [args, {'PR', def.PR}]; end
@@ -296,7 +297,7 @@ function u = buildUnitFromDef(def, streams)
             sIn = findS(def.inlet, streams);
             sOut = findS(def.outlet, streams);
             if ~isempty(sIn) && ~isempty(sOut)
-                mix = buildThermoMix(cfg);
+                mix = buildThermoMix(speciesNames);
                 args = {};
                 if isfield(def,'Pout'), args = [args, {'Pout', def.Pout}]; end
                 if isfield(def,'PR'), args = [args, {'PR', def.PR}]; end
@@ -307,7 +308,7 @@ function u = buildUnitFromDef(def, streams)
             sIn = findS(def.inlet, streams);
             sOut = findS(def.outlet, streams);
             if ~isempty(sIn) && ~isempty(sOut)
-                mix = buildThermoMix(cfg);
+                mix = buildThermoMix(speciesNames);
                 args = {};
                 if isfield(def,'Tout'), args = [args, {'Tout', def.Tout}]; end
                 if isfield(def,'duty'), args = [args, {'duty', def.duty}]; end
@@ -317,7 +318,7 @@ function u = buildUnitFromDef(def, streams)
             sIn = findS(def.inlet, streams);
             sOut = findS(def.outlet, streams);
             if ~isempty(sIn) && ~isempty(sOut)
-                mix = buildThermoMix(cfg);
+                mix = buildThermoMix(speciesNames);
                 args = {};
                 if isfield(def,'Tout'), args = [args, {'Tout', def.Tout}]; end
                 if isfield(def,'duty'), args = [args, {'duty', def.duty}]; end
@@ -329,7 +330,7 @@ function u = buildUnitFromDef(def, streams)
             cIn = findS(def.coldInlet, streams);
             cOut = findS(def.coldOutlet, streams);
             if ~isempty(hIn) && ~isempty(hOut) && ~isempty(cIn) && ~isempty(cOut)
-                mix = buildThermoMix(cfg);
+                mix = buildThermoMix(speciesNames);
                 args = {};
                 if isfield(def,'Th_out'), args = [args, {'Th_out', def.Th_out}]; end
                 if isfield(def,'Tc_out'), args = [args, {'Tc_out', def.Tc_out}]; end
@@ -339,10 +340,10 @@ function u = buildUnitFromDef(def, streams)
     end
 end
 
-function mix = buildThermoMix(cfg)
-    %BUILDTHERMOMIX Create IdealGasMixture from config species names.
+function mix = buildThermoMix(speciesNames)
+    %BUILDTHERMOMIX Create IdealGasMixture from species names.
     lib = thermo.ThermoLibrary();
-    mix = thermo.IdealGasMixture(cfg.speciesNames, lib);
+    mix = thermo.IdealGasMixture(speciesNames, lib);
 end
 
 function [resolvedDefs, aliasByOutlet] = resolveIdentityLinks(unitDefs)
@@ -412,6 +413,18 @@ function def = rewriteDefStreams(def, aliasByOutlet)
     end
     if isfield(def, 'outletB')
         def.outletB = resolveAliasName(def.outletB, aliasByOutlet);
+    end
+    if isfield(def, 'hotInlet')
+        def.hotInlet = resolveAliasName(def.hotInlet, aliasByOutlet);
+    end
+    if isfield(def, 'hotOutlet')
+        def.hotOutlet = resolveAliasName(def.hotOutlet, aliasByOutlet);
+    end
+    if isfield(def, 'coldInlet')
+        def.coldInlet = resolveAliasName(def.coldInlet, aliasByOutlet);
+    end
+    if isfield(def, 'coldOutlet')
+        def.coldOutlet = resolveAliasName(def.coldOutlet, aliasByOutlet);
     end
     if isfield(def, 'inlets')
         for k = 1:numel(def.inlets)

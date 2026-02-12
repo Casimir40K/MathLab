@@ -14,7 +14,13 @@ classdef MathLabApp < handle
         Tabs
         StatusBar
 
-        % -- Tab 1: Species & Config --
+        % -- Tab 0: Setup & Config --
+        SetupTab
+        SaveConfigBtn
+        LoadConfigBtn
+        InstructionsArea
+
+        % -- Tab 1: Species & Properties --
         SpeciesTab
         SpeciesTable
         AddSpeciesBtn
@@ -22,9 +28,7 @@ classdef MathLabApp < handle
         NewSpeciesName
         NewSpeciesMW
         ApplySpeciesBtn
-        SaveConfigBtn
-        LoadConfigBtn
-        InstructionsArea
+        SpeciesPropsTable
 
         % -- Tab 2: Streams --
         StreamsTab
@@ -130,6 +134,7 @@ classdef MathLabApp < handle
                 'FontSize', 12);
             app.StatusBar.Layout.Row = 2;
 
+            app.buildSetupTab();
             app.buildSpeciesTab();
             app.buildStreamsTab();
             app.buildUnitsTab();
@@ -139,39 +144,19 @@ classdef MathLabApp < handle
         end
 
         % ================================================================
-        %  TAB 1: SPECIES & CONFIG
+        %  TAB 0: SETUP & CONFIG
         % ================================================================
-        function buildSpeciesTab(app)
-            t = uitab(app.Tabs, 'Title', ' Species ');
-            app.SpeciesTab = t;
+        function buildSetupTab(app)
+            t = uitab(app.Tabs, 'Title', ' Setup ');
+            app.SetupTab = t;
 
             gl = uigridlayout(t, [1 2], 'ColumnWidth',{'1x','1x'}, ...
                 'Padding',[12 12 12 12], 'ColumnSpacing',12);
 
-            % --- Left: species editor + save/load ---
-            leftP = uipanel(gl, 'Title','Species & Properties', 'FontWeight','bold');
-            leftG = uigridlayout(leftP, [7 1], ...
-                'RowHeight',{'1x', 30, 30, 36, 30, 36, 36}, 'Padding',[8 8 8 8], 'RowSpacing',4);
-
-            app.SpeciesTable = uitable(leftG, 'ColumnEditable',[true true], ...
-                'ColumnName', {'Name','MW (kg/kmol)'}, ...
-                'CellEditCallback', @(src,evt) app.onSpeciesTableEdit(src,evt));
-
-            % Add row
-            addR = uigridlayout(leftG, [1 3], 'ColumnWidth',{'1x','1x',80}, ...
-                'Padding',[0 0 0 0]);
-            app.NewSpeciesName = uieditfield(addR,'text','Placeholder','Name');
-            app.NewSpeciesMW   = uieditfield(addR,'numeric','Value',28.0,'Limits',[0.001 1e6]);
-            app.AddSpeciesBtn  = uibutton(addR,'push','Text','+ Add', ...
-                'ButtonPushedFcn',@(~,~) app.addSpeciesRow());
-
-            app.RemoveSpeciesBtn = uibutton(leftG,'push','Text','Remove Selected Row', ...
-                'ButtonPushedFcn',@(~,~) app.removeSpeciesRow());
-
-            app.ApplySpeciesBtn = uibutton(leftG,'push', ...
-                'Text','Apply Species (resets streams & units)', ...
-                'FontWeight','bold', 'BackgroundColor',[0.82 0.90 1.0], ...
-                'ButtonPushedFcn',@(~,~) app.applySpecies());
+            % --- Left: project config + save/load ---
+            leftP = uipanel(gl, 'Title','Project & Config', 'FontWeight','bold');
+            leftG = uigridlayout(leftP, [4 1], ...
+                'RowHeight',{30, 36, 36, 36}, 'Padding',[8 8 8 8], 'RowSpacing',4);
 
             % Project title row
             titleRow = uigridlayout(leftG, [1 2], 'ColumnWidth',{110,'1x'}, ...
@@ -201,6 +186,9 @@ classdef MathLabApp < handle
                 'BackgroundColor',[0.85 0.92 0.95], ...
                 'ButtonPushedFcn',@(~,~) app.saveResultsToOutput());
 
+            % Placeholder for future options
+            uilabel(leftG, 'Text', '');
+
             % --- Right: instructions ---
             rightP = uipanel(gl, 'Title','How to Use MathLab', 'FontWeight','bold');
             rightG = uigridlayout(rightP, [1 1], 'Padding',[8 8 8 8]);
@@ -209,12 +197,13 @@ classdef MathLabApp < handle
                 'WORKFLOW'; ...
                 '========'; ...
                 ''; ...
-                '1. SPECIES  — define names + MW, click Apply.'; ...
-                '2. STREAMS  — add streams, set values & known flags.'; ...
-                '3. UNITS    — add unit ops, pick stream connections.'; ...
-                '4. SOLVE    — check DOF, click Solve, see residuals.'; ...
-                '5. RESULTS  — full solved stream table.'; ...
-                '6. SENSITIVITY — sweep a parameter.'; ...
+                '1. SETUP    — set project title, save/load config.'; ...
+                '2. SPECIES  — define names, MW, thermo props. Apply.'; ...
+                '3. STREAMS  — add streams, set values & known flags.'; ...
+                '4. UNITS    — add unit ops, pick stream connections.'; ...
+                '5. SOLVE    — check DOF, click Solve, see residuals.'; ...
+                '6. RESULTS  — full solved stream table.'; ...
+                '7. SENSITIVITY — sweep a parameter.'; ...
                 ''; ...
                 'SAVE / LOAD'; ...
                 '==========='; ...
@@ -231,7 +220,50 @@ classdef MathLabApp < handle
                 '- Mole fractions (y) must sum to 1.0'; ...
                 '- All streams need finite positive guesses'; ...
                 '- Watch the DOF counter on Streams/Units tabs'; ...
-                '- Feed streams: all values Known'});
+                '- Feed streams: all values Known'; ...
+                '- Species with Shomate data enable thermo units'});
+        end
+
+        % ================================================================
+        %  TAB 1: SPECIES & PROPERTIES
+        % ================================================================
+        function buildSpeciesTab(app)
+            t = uitab(app.Tabs, 'Title', ' Species ');
+            app.SpeciesTab = t;
+
+            gl = uigridlayout(t, [1 2], 'ColumnWidth',{'1x','1x'}, ...
+                'Padding',[12 12 12 12], 'ColumnSpacing',12);
+
+            % --- Left: species editor ---
+            leftP = uipanel(gl, 'Title','Species List', 'FontWeight','bold');
+            leftG = uigridlayout(leftP, [4 1], ...
+                'RowHeight',{'1x', 30, 30, 36}, 'Padding',[8 8 8 8], 'RowSpacing',4);
+
+            app.SpeciesTable = uitable(leftG, 'ColumnEditable',[true true], ...
+                'ColumnName', {'Name','MW (kg/kmol)'}, ...
+                'CellEditCallback', @(src,evt) app.onSpeciesTableEdit(src,evt));
+
+            % Add row
+            addR = uigridlayout(leftG, [1 3], 'ColumnWidth',{'1x','1x',80}, ...
+                'Padding',[0 0 0 0]);
+            app.NewSpeciesName = uieditfield(addR,'text','Placeholder','Name');
+            app.NewSpeciesMW   = uieditfield(addR,'numeric','Value',28.0,'Limits',[0.001 1e6]);
+            app.AddSpeciesBtn  = uibutton(addR,'push','Text','+ Add', ...
+                'ButtonPushedFcn',@(~,~) app.addSpeciesRow());
+
+            app.RemoveSpeciesBtn = uibutton(leftG,'push','Text','Remove Selected Row', ...
+                'ButtonPushedFcn',@(~,~) app.removeSpeciesRow());
+
+            app.ApplySpeciesBtn = uibutton(leftG,'push', ...
+                'Text','Apply Species (resets streams & units)', ...
+                'FontWeight','bold', 'BackgroundColor',[0.82 0.90 1.0], ...
+                'ButtonPushedFcn',@(~,~) app.applySpecies());
+
+            % --- Right: thermodynamic properties (read-only from library) ---
+            rightP = uipanel(gl, 'Title','Thermodynamic Properties (from library)', 'FontWeight','bold');
+            rightG = uigridlayout(rightP, [1 1], 'Padding',[8 8 8 8]);
+            app.SpeciesPropsTable = uitable(rightG, 'ColumnEditable',false, ...
+                'ColumnName', {'Name','MW','Cp@298 (kJ/kmol/K)','Hf298 (kJ/kmol)','S298 (kJ/kmol/K)','T range (K)'});
         end
 
         % ================================================================
@@ -315,6 +347,11 @@ classdef MathLabApp < handle
                     'ConversionReactor', ...
                     'YieldReactor', ...
                     'EquilibriumReactor', ...
+                    'Heater', ...
+                    'Cooler', ...
+                    'HeatExchanger', ...
+                    'Compressor', ...
+                    'Turbine', ...
                     'Separator', ...
                     'Purge', ...
                     'Splitter', ...
@@ -557,9 +594,46 @@ classdef MathLabApp < handle
             app.refreshFlowsheetDiagram();
             app.updateDOF();
             app.updateSensDropdowns();
+            app.refreshSpeciesPropsTable();
             app.StreamNameField.Value = 'S2';
             app.setStatus(sprintf('Species set: {%s}. Feed created.', ...
                 strjoin(app.speciesNames,', ')));
+        end
+
+        function refreshSpeciesPropsTable(app)
+            % Populate the thermodynamic properties table from the library
+            N = numel(app.speciesNames);
+            data = cell(N, 6);
+            try
+                lib = thermo.ThermoLibrary();
+            catch
+                lib = [];
+            end
+            for i = 1:N
+                data{i,1} = app.speciesNames{i};
+                data{i,2} = app.speciesMW(i);
+                if ~isempty(lib) && lib.hasSpecies(app.speciesNames{i})
+                    sp = lib.get(app.speciesNames{i});
+                    try
+                        data{i,3} = sp.cp_molar(298.15);
+                    catch
+                        data{i,3} = NaN;
+                    end
+                    data{i,4} = sp.Hf298_kJkmol;
+                    data{i,5} = sp.S298_kJkmolK;
+                    if ~isempty(sp.ranges)
+                        Tlo = sp.ranges(1).Tmin;
+                        Thi = sp.ranges(end).Tmax;
+                        data{i,6} = sprintf('%.0f - %.0f', Tlo, Thi);
+                    else
+                        data{i,6} = 'N/A';
+                    end
+                else
+                    data{i,3} = NaN; data{i,4} = NaN; data{i,5} = NaN;
+                    data{i,6} = 'Not in library';
+                end
+            end
+            app.SpeciesPropsTable.Data = data;
         end
     end
 
@@ -778,6 +852,11 @@ classdef MathLabApp < handle
                 case 'ConversionReactor', app.dialogConversionReactor(sNames);
                 case 'YieldReactor', app.dialogYieldReactor(sNames);
                 case 'EquilibriumReactor', app.dialogEquilibriumReactor(sNames);
+                case 'Heater',    app.dialogHeater(sNames);
+                case 'Cooler',    app.dialogCooler(sNames);
+                case 'HeatExchanger', app.dialogHeatExchanger(sNames);
+                case 'Compressor', app.dialogCompressor(sNames);
+                case 'Turbine',   app.dialogTurbine(sNames);
                 case 'Separator', app.dialogSeparator(sNames);
                 case 'Purge',     app.dialogPurge(sNames);
                 case 'Splitter',  app.dialogSplitter(sNames);
@@ -805,6 +884,11 @@ classdef MathLabApp < handle
             elseif contains(cn,'YieldReactor'), app.dialogYieldReactor(sNames,idx);
             elseif contains(cn,'EquilibriumReactor'), app.dialogEquilibriumReactor(sNames,idx);
             elseif contains(cn,'Reactor'), app.dialogReactor(sNames,idx);
+            elseif contains(cn,'Heater'), app.dialogHeater(sNames,idx);
+            elseif contains(cn,'Cooler'), app.dialogCooler(sNames,idx);
+            elseif contains(cn,'HeatExchanger'), app.dialogHeatExchanger(sNames,idx);
+            elseif contains(cn,'Compressor'), app.dialogCompressor(sNames,idx);
+            elseif contains(cn,'Turbine'), app.dialogTurbine(sNames,idx);
             elseif contains(cn,'Separator'), app.dialogSeparator(sNames,idx);
             elseif contains(cn,'Purge'), app.dialogPurge(sNames,idx);
             elseif contains(cn,'Splitter'), app.dialogSplitter(sNames,idx);
@@ -879,6 +963,14 @@ classdef MathLabApp < handle
                         src{end+1}=char(string(u.inlets{k}.name)); tgt{end+1}=uName; elbl{end+1}='';
                     end
                     src{end+1}=uName; tgt{end+1}=char(string(u.outlet.name)); elbl{end+1}='';
+                elseif contains(cn,'Heater') || contains(cn,'Cooler') || contains(cn,'Compressor') || contains(cn,'Turbine')
+                    src{end+1}=char(string(u.inlet.name)); tgt{end+1}=uName; elbl{end+1}='';
+                    src{end+1}=uName; tgt{end+1}=char(string(u.outlet.name)); elbl{end+1}='';
+                elseif contains(cn,'HeatExchanger')
+                    src{end+1}=char(string(u.hotInlet.name)); tgt{end+1}=uName; elbl{end+1}='hot in';
+                    src{end+1}=uName; tgt{end+1}=char(string(u.hotOutlet.name)); elbl{end+1}='hot out';
+                    src{end+1}=char(string(u.coldInlet.name)); tgt{end+1}=uName; elbl{end+1}='cold in';
+                    src{end+1}=uName; tgt{end+1}=char(string(u.coldOutlet.name)); elbl{end+1}='cold out';
                 elseif contains(cn,'Reactor')
                     src{end+1}=char(string(u.inlet.name)); tgt{end+1}=uName; elbl{end+1}='';
                     src{end+1}=uName; tgt{end+1}=char(string(u.outlet.name)); elbl{end+1}='';
@@ -951,6 +1043,11 @@ classdef MathLabApp < handle
                 'ConversionReactor', [0.85 0.20 0.20], ...
                 'YieldReactor', [0.85 0.20 0.20], ...
                 'EquilibriumReactor', [0.85 0.20 0.20], ...
+                'Heater',   [0.85 0.45 0.10], ...
+                'Cooler',   [0.10 0.55 0.85], ...
+                'HeatExchanger', [0.65 0.35 0.65], ...
+                'Compressor',[0.40 0.70 0.30], ...
+                'Turbine',  [0.30 0.50 0.70], ...
                 'Separator',[0.10 0.40 0.80], ...
                 'Purge',    [0.70 0.40 0.80], ...
                 'Splitter', [0.90 0.55 0.10], ...
@@ -971,6 +1068,11 @@ classdef MathLabApp < handle
                 'ConversionReactor', 'd', ...
                 'YieldReactor', 'd', ...
                 'EquilibriumReactor', 'd', ...
+                'Heater',   '*', ...
+                'Cooler',   'x', ...
+                'HeatExchanger','o', ...
+                'Compressor','+', ...
+                'Turbine',  '+', ...
                 'Separator','^', ...  % triangle up
                 'Purge',    'v', ...     % triangle down
                 'Splitter', '>', ...
@@ -1249,6 +1351,170 @@ classdef MathLabApp < handle
                 def.nu=nu; def.Keq=ctrls{4}.Value; def.referenceSpecies=ctrls{5}.Value;
                 u=proc.units.EquilibriumReactor(app.findStream(def.inlet), app.findStream(def.outlet), ...
                     def.nu, def.Keq, 'referenceSpecies', def.referenceSpecies);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogHeater(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Heater', 460, 180, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Spec mode:','dropdown',{'Tout','duty'}}, ...
+                 {'Value (Tout [K] or duty [kW]):','numeric',400}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.outlet.name));
+                if isfinite(u.Tout), ctrls{3}.Value='Tout'; ctrls{4}.Value=u.Tout;
+                else, ctrls{3}.Value='duty'; ctrls{4}.Value=u.duty; end
+            elseif numel(sNames)>=2, ctrls{2}.Value=sNames{2}; end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def.type='Heater'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
+                mode=ctrls{3}.Value; val=ctrls{4}.Value;
+                if strcmp(mode,'Tout'), def.Tout=val; else, def.duty=val; end
+                mix = app.buildThermoMixForGUI();
+                if isempty(mix), uialert(d,'Species not in thermo library.','Error'); return; end
+                args = {};
+                if isfield(def,'Tout'), args=[args,{'Tout',def.Tout}]; end
+                if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                u=proc.units.Heater(app.findStream(def.inlet),app.findStream(def.outlet),mix,args{:});
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogCooler(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Cooler', 460, 180, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Spec mode:','dropdown',{'Tout','duty'}}, ...
+                 {'Value (Tout [K] or duty [kW]):','numeric',300}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.outlet.name));
+                if isfinite(u.Tout), ctrls{3}.Value='Tout'; ctrls{4}.Value=u.Tout;
+                else, ctrls{3}.Value='duty'; ctrls{4}.Value=u.duty; end
+            elseif numel(sNames)>=2, ctrls{2}.Value=sNames{2}; end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def.type='Cooler'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
+                mode=ctrls{3}.Value; val=ctrls{4}.Value;
+                if strcmp(mode,'Tout'), def.Tout=val; else, def.duty=val; end
+                mix = app.buildThermoMixForGUI();
+                if isempty(mix), uialert(d,'Species not in thermo library.','Error'); return; end
+                args = {};
+                if isfield(def,'Tout'), args=[args,{'Tout',def.Tout}]; end
+                if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                u=proc.units.Cooler(app.findStream(def.inlet),app.findStream(def.outlet),mix,args{:});
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogHeatExchanger(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure HeatExchanger', 520, 260, ...
+                {{'Hot inlet:','dropdown',sNames}, ...
+                 {'Hot outlet:','dropdown',sNames}, ...
+                 {'Cold inlet:','dropdown',sNames}, ...
+                 {'Cold outlet:','dropdown',sNames}, ...
+                 {'Spec mode:','dropdown',{'Th_out','Tc_out','duty'}}, ...
+                 {'Value (T [K] or Q [kW]):','numeric',350}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.hotInlet.name));
+                ctrls{2}.Value=char(string(u.hotOutlet.name));
+                ctrls{3}.Value=char(string(u.coldInlet.name));
+                ctrls{4}.Value=char(string(u.coldOutlet.name));
+                if isfinite(u.Th_out), ctrls{5}.Value='Th_out'; ctrls{6}.Value=u.Th_out;
+                elseif isfinite(u.Tc_out), ctrls{5}.Value='Tc_out'; ctrls{6}.Value=u.Tc_out;
+                else, ctrls{5}.Value='duty'; ctrls{6}.Value=u.duty; end
+            elseif numel(sNames)>=4
+                ctrls{2}.Value=sNames{2}; ctrls{3}.Value=sNames{3}; ctrls{4}.Value=sNames{4};
+            end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def.type='HeatExchanger';
+                def.hotInlet=ctrls{1}.Value; def.hotOutlet=ctrls{2}.Value;
+                def.coldInlet=ctrls{3}.Value; def.coldOutlet=ctrls{4}.Value;
+                mode=ctrls{5}.Value; val=ctrls{6}.Value;
+                if strcmp(mode,'Th_out'), def.Th_out=val;
+                elseif strcmp(mode,'Tc_out'), def.Tc_out=val;
+                else, def.duty=val; end
+                mix = app.buildThermoMixForGUI();
+                if isempty(mix), uialert(d,'Species not in thermo library.','Error'); return; end
+                args = {};
+                if isfield(def,'Th_out'), args=[args,{'Th_out',def.Th_out}]; end
+                if isfield(def,'Tc_out'), args=[args,{'Tc_out',def.Tc_out}]; end
+                if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                u=proc.units.HeatExchanger(app.findStream(def.hotInlet),app.findStream(def.hotOutlet),...
+                    app.findStream(def.coldInlet),app.findStream(def.coldOutlet),mix,args{:});
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogCompressor(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Compressor', 480, 220, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Pressure spec:','dropdown',{'Pout','PR'}}, ...
+                 {'Value (Pout [Pa] or PR):','numeric',2e5}, ...
+                 {'Isentropic efficiency (0-1]:','numeric',0.85}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.outlet.name));
+                if isfinite(u.Pout), ctrls{3}.Value='Pout'; ctrls{4}.Value=u.Pout;
+                else, ctrls{3}.Value='PR'; ctrls{4}.Value=u.PR; end
+                ctrls{5}.Value=u.eta;
+            elseif numel(sNames)>=2, ctrls{2}.Value=sNames{2}; end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def.type='Compressor'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
+                mode=ctrls{3}.Value; val=ctrls{4}.Value;
+                if strcmp(mode,'Pout'), def.Pout=val; else, def.PR=val; end
+                def.eta=ctrls{5}.Value;
+                mix = app.buildThermoMixForGUI();
+                if isempty(mix), uialert(d,'Species not in thermo library.','Error'); return; end
+                args = {'eta', def.eta};
+                if isfield(def,'Pout'), args=[args,{'Pout',def.Pout}]; end
+                if isfield(def,'PR'), args=[args,{'PR',def.PR}]; end
+                u=proc.units.Compressor(app.findStream(def.inlet),app.findStream(def.outlet),mix,args{:});
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogTurbine(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Turbine', 480, 220, ...
+                {{'Inlet:','dropdown',sNames}, ...
+                 {'Outlet:','dropdown',sNames}, ...
+                 {'Pressure spec:','dropdown',{'Pout','PR'}}, ...
+                 {'Value (Pout [Pa] or PR):','numeric',5e4}, ...
+                 {'Isentropic efficiency (0-1]:','numeric',0.85}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name));
+                ctrls{2}.Value=char(string(u.outlet.name));
+                if isfinite(u.Pout), ctrls{3}.Value='Pout'; ctrls{4}.Value=u.Pout;
+                else, ctrls{3}.Value='PR'; ctrls{4}.Value=u.PR; end
+                ctrls{5}.Value=u.eta;
+            elseif numel(sNames)>=2, ctrls{2}.Value=sNames{2}; end
+            app.addDialogButtons(d, @okCb);
+            function okCb()
+                def.type='Turbine'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
+                mode=ctrls{3}.Value; val=ctrls{4}.Value;
+                if strcmp(mode,'Pout'), def.Pout=val; else, def.PR=val; end
+                def.eta=ctrls{5}.Value;
+                mix = app.buildThermoMixForGUI();
+                if isempty(mix), uialert(d,'Species not in thermo library.','Error'); return; end
+                args = {'eta', def.eta};
+                if isfield(def,'Pout'), args=[args,{'Pout',def.Pout}]; end
+                if isfield(def,'PR'), args=[args,{'PR',def.PR}]; end
+                u=proc.units.Turbine(app.findStream(def.inlet),app.findStream(def.outlet),mix,args{:});
                 app.commitUnit(u,def,editIdx); delete(d);
             end
         end
@@ -1841,6 +2107,7 @@ classdef MathLabApp < handle
             app.refreshFlowsheetDiagram();
             app.updateDOF();
             app.updateSensDropdowns();
+            app.refreshSpeciesPropsTable();
 
             % Auto-suggest next stream name
             if ~isempty(app.streams)
@@ -2008,6 +2275,61 @@ classdef MathLabApp < handle
                     if ~isempty(s)
                         u = proc.units.Constraint(s, def.field, def.value, def.index);
                     end
+                case 'Heater'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        mix = app.buildThermoMixForGUI();
+                        args = {};
+                        if isfield(def,'Tout'), args=[args,{'Tout',def.Tout}]; end
+                        if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                        u = proc.units.Heater(sIn, sOut, mix, args{:});
+                    end
+                case 'Cooler'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        mix = app.buildThermoMixForGUI();
+                        args = {};
+                        if isfield(def,'Tout'), args=[args,{'Tout',def.Tout}]; end
+                        if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                        u = proc.units.Cooler(sIn, sOut, mix, args{:});
+                    end
+                case 'HeatExchanger'
+                    hIn = app.findStream(def.hotInlet);
+                    hOut = app.findStream(def.hotOutlet);
+                    cIn = app.findStream(def.coldInlet);
+                    cOut = app.findStream(def.coldOutlet);
+                    if ~isempty(hIn) && ~isempty(hOut) && ~isempty(cIn) && ~isempty(cOut)
+                        mix = app.buildThermoMixForGUI();
+                        args = {};
+                        if isfield(def,'Th_out'), args=[args,{'Th_out',def.Th_out}]; end
+                        if isfield(def,'Tc_out'), args=[args,{'Tc_out',def.Tc_out}]; end
+                        if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                        u = proc.units.HeatExchanger(hIn, hOut, cIn, cOut, mix, args{:});
+                    end
+                case 'Compressor'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        mix = app.buildThermoMixForGUI();
+                        args = {};
+                        if isfield(def,'Pout'), args=[args,{'Pout',def.Pout}]; end
+                        if isfield(def,'PR'), args=[args,{'PR',def.PR}]; end
+                        if isfield(def,'eta'), args=[args,{'eta',def.eta}]; end
+                        u = proc.units.Compressor(sIn, sOut, mix, args{:});
+                    end
+                case 'Turbine'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        mix = app.buildThermoMixForGUI();
+                        args = {};
+                        if isfield(def,'Pout'), args=[args,{'Pout',def.Pout}]; end
+                        if isfield(def,'PR'), args=[args,{'PR',def.PR}]; end
+                        if isfield(def,'eta'), args=[args,{'eta',def.eta}]; end
+                        u = proc.units.Turbine(sIn, sOut, mix, args{:});
+                    end
             end
         end
 
@@ -2122,6 +2444,45 @@ classdef MathLabApp < handle
                         case 'Constraint'
                             fprintf(fid, 'fs.addUnit(proc.units.Constraint(%s, ''%s'', %.6g, %.6g));\n', ...
                                 def.stream, def.field, def.value, def.index);
+                        case 'Heater'
+                            fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
+                            fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
+                            args = '';
+                            if isfield(def,'Tout'), args = sprintf(', ''Tout'', %.6g', def.Tout); end
+                            if isfield(def,'duty'), args = sprintf(', ''duty'', %.6g', def.duty); end
+                            fprintf(fid, 'fs.addUnit(proc.units.Heater(%s, %s, mix%s));\n', def.inlet, def.outlet, args);
+                        case 'Cooler'
+                            fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
+                            fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
+                            args = '';
+                            if isfield(def,'Tout'), args = sprintf(', ''Tout'', %.6g', def.Tout); end
+                            if isfield(def,'duty'), args = sprintf(', ''duty'', %.6g', def.duty); end
+                            fprintf(fid, 'fs.addUnit(proc.units.Cooler(%s, %s, mix%s));\n', def.inlet, def.outlet, args);
+                        case 'HeatExchanger'
+                            fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
+                            fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
+                            args = '';
+                            if isfield(def,'Th_out'), args = sprintf(', ''Th_out'', %.6g', def.Th_out); end
+                            if isfield(def,'Tc_out'), args = sprintf(', ''Tc_out'', %.6g', def.Tc_out); end
+                            if isfield(def,'duty'), args = sprintf(', ''duty'', %.6g', def.duty); end
+                            fprintf(fid, 'fs.addUnit(proc.units.HeatExchanger(%s, %s, %s, %s, mix%s));\n', ...
+                                def.hotInlet, def.hotOutlet, def.coldInlet, def.coldOutlet, args);
+                        case 'Compressor'
+                            fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
+                            fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
+                            args = '';
+                            if isfield(def,'Pout'), args = [args, sprintf(', ''Pout'', %.6g', def.Pout)]; end
+                            if isfield(def,'PR'), args = [args, sprintf(', ''PR'', %.6g', def.PR)]; end
+                            if isfield(def,'eta'), args = [args, sprintf(', ''eta'', %.6g', def.eta)]; end
+                            fprintf(fid, 'fs.addUnit(proc.units.Compressor(%s, %s, mix%s));\n', def.inlet, def.outlet, args);
+                        case 'Turbine'
+                            fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
+                            fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
+                            args = '';
+                            if isfield(def,'Pout'), args = [args, sprintf(', ''Pout'', %.6g', def.Pout)]; end
+                            if isfield(def,'PR'), args = [args, sprintf(', ''PR'', %.6g', def.PR)]; end
+                            if isfield(def,'eta'), args = [args, sprintf(', ''eta'', %.6g', def.eta)]; end
+                            fprintf(fid, 'fs.addUnit(proc.units.Turbine(%s, %s, mix%s));\n', def.inlet, def.outlet, args);
                     end
                 end
             end
@@ -2358,7 +2719,8 @@ classdef MathLabApp < handle
 
         function def = rewriteDefStreams(app, def, aliasByOutlet)
             fnSingles = {'inlet','source','stream','tear','processInlet','bypassStream','processReturn', ...
-                'lhsStream','aStream','bStream','recycle','purge','outlet','outletA','outletB'};
+                'lhsStream','aStream','bStream','recycle','purge','outlet','outletA','outletB', ...
+                'hotInlet','hotOutlet','coldInlet','coldOutlet'};
             for i = 1:numel(fnSingles)
                 f = fnSingles{i};
                 if ~isfield(def, f)
@@ -2412,6 +2774,17 @@ classdef MathLabApp < handle
                 end
                 visited(outName) = true;
                 outName = aliasByOutlet(outName);
+            end
+        end
+
+        function mix = buildThermoMixForGUI(app)
+            % Build an IdealGasMixture from the current species list.
+            % Returns [] if any species is missing from the thermo library.
+            try
+                lib = thermo.ThermoLibrary();
+                mix = thermo.IdealGasMixture(app.speciesNames, lib);
+            catch
+                mix = [];
             end
         end
 
