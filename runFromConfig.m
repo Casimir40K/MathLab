@@ -281,6 +281,32 @@ function u = buildUnitFromDef(def, streams)
             if ~isempty(s)
                 u = proc.units.Constraint(s, def.field, def.value, def.index);
             end
+        case 'Compressor'
+            sIn = findS(def.inlet, streams); sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                u = proc.units.Compressor(sIn, sOut, def);
+            end
+        case 'Turbine'
+            sIn = findS(def.inlet, streams); sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                u = proc.units.Turbine(sIn, sOut, def);
+            end
+        case 'Heater'
+            sIn = findS(def.inlet, streams); sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                u = proc.units.Heater(sIn, sOut, def);
+            end
+        case 'Cooler'
+            sIn = findS(def.inlet, streams); sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                u = proc.units.Cooler(sIn, sOut, def);
+            end
+        case 'HeatExchanger'
+            hIn = findS(def.hotIn, streams); hOut = findS(def.hotOut, streams);
+            cIn = findS(def.coldIn, streams); cOut = findS(def.coldOut, streams);
+            if ~isempty(hIn) && ~isempty(hOut) && ~isempty(cIn) && ~isempty(cOut)
+                u = proc.units.HeatExchanger(hIn, hOut, cIn, cOut, def);
+            end
     end
 end
 
@@ -341,6 +367,18 @@ function def = rewriteDefStreams(def, aliasByOutlet)
     end
     if isfield(def, 'purge')
         def.purge = resolveAliasName(def.purge, aliasByOutlet);
+    end
+    if isfield(def, 'hotIn')
+        def.hotIn = resolveAliasName(def.hotIn, aliasByOutlet);
+    end
+    if isfield(def, 'hotOut')
+        def.hotOut = resolveAliasName(def.hotOut, aliasByOutlet);
+    end
+    if isfield(def, 'coldIn')
+        def.coldIn = resolveAliasName(def.coldIn, aliasByOutlet);
+    end
+    if isfield(def, 'coldOut')
+        def.coldOut = resolveAliasName(def.coldOut, aliasByOutlet);
     end
     if isfield(def, 'outlet')
         if ~strcmp(def.type, 'Link') || ~isIdentityLinkDef(def)

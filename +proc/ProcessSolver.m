@@ -110,6 +110,7 @@ classdef ProcessSolver < handle
             obj.residualEvalCount = 0;
 
             nDisabled = obj.configureNormalizationConstraints();
+            obj.applyUnitInitialGuesses();
             if obj.removeRedundantNormalizationConstraints
                 obj.log('Normalization constraints disabled on %d unit(s) (y uses softmax parameterization).', nDisabled);
             else
@@ -316,6 +317,44 @@ classdef ProcessSolver < handle
             end
         end
 
+
+        function applyUnitInitialGuesses(obj)
+            for u = 1:numel(obj.units)
+                unit = obj.units{u};
+                if isa(unit, 'proc.units.Compressor') || isa(unit, 'proc.units.Turbine')
+                    inS = unit.inlet; outS = unit.outlet;
+                    knownT = isprop(outS,'known') && isfield(outS.known,'T') && outS.known.T;
+                    if ~knownT
+                        try
+                            Pout = unit.resolvePout();
+                            k = inS.gamma(inS.T);
+                            expn = (k - 1) / max(k, 1e-9);
+                            if isa(unit, 'proc.units.Compressor')
+                                outS.T = inS.T * (Pout / max(inS.P,1))^expn;
+                            else
+                                outS.T = inS.T * (Pout / max(inS.P,1))^expn;
+                            end
+                        catch
+                            outS.T = inS.T;
+                        end
+                    end
+                elseif isa(unit, 'proc.units.Heater') || isa(unit, 'proc.units.Cooler')
+                    outS = unit.outlet; inS = unit.inlet;
+                    knownT = isprop(outS,'known') && isfield(outS.known,'T') && outS.known.T;
+                    if ~knownT && ~isfinite(outS.T)
+                        outS.T = inS.T;
+                    end
+                elseif isa(unit, 'proc.units.HeatExchanger')
+                    hk = unit.hotOut; ck = unit.coldOut;
+                    if ~(isprop(hk,'known') && isfield(hk.known,'T') && hk.known.T)
+                        if ~isfinite(hk.T), hk.T = unit.hotIn.T; end
+                    end
+                    if ~(isprop(ck,'known') && isfield(ck.known,'T') && ck.known.T)
+                        if ~isfinite(ck.T), ck.T = unit.coldIn.T; end
+                    end
+                end
+            end
+        end
         function nDisabled = configureNormalizationConstraints(obj)
             nDisabled = 0;
             for u = 1:numel(obj.units)

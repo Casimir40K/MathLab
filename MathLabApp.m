@@ -326,7 +326,12 @@ classdef MathLabApp < handle
                     'DesignSpec', ...
                     'Adjust', ...
                     'Calculator', ...
-                    'Constraint' ...
+                    'Constraint', ...
+                    'Compressor', ...
+                    'Turbine', ...
+                    'Heater', ...
+                    'Cooler', ...
+                    'HeatExchanger' ...
                 }, ...
                 'Value', 'Mixer');
             app.AddUnitBtn = uibutton(addRow,'push','Text','Add Unit...', ...
@@ -790,6 +795,11 @@ classdef MathLabApp < handle
                 case 'Adjust',    app.dialogAdjust(sNames);
                 case 'Calculator', app.dialogCalculator(sNames);
                 case 'Constraint', app.dialogConstraint(sNames);
+                case 'Compressor', app.dialogCompressor(sNames);
+                case 'Turbine', app.dialogTurbine(sNames);
+                case 'Heater', app.dialogHeater(sNames);
+                case 'Cooler', app.dialogCooler(sNames);
+                case 'HeatExchanger', app.dialogHeatExchanger(sNames);
             end
         end
 
@@ -817,6 +827,11 @@ classdef MathLabApp < handle
             elseif contains(cn,'Adjust'), app.dialogAdjust(sNames,idx);
             elseif contains(cn,'Calculator'), app.dialogCalculator(sNames,idx);
             elseif contains(cn,'Constraint'), app.dialogConstraint(sNames,idx);
+            elseif contains(cn,'Compressor'), app.dialogCompressor(sNames,idx);
+            elseif contains(cn,'Turbine'), app.dialogTurbine(sNames,idx);
+            elseif contains(cn,'Heater'), app.dialogHeater(sNames,idx);
+            elseif contains(cn,'Cooler'), app.dialogCooler(sNames,idx);
+            elseif contains(cn,'HeatExchanger'), app.dialogHeatExchanger(sNames,idx);
             end
         end
 
@@ -1695,6 +1710,119 @@ classdef MathLabApp < handle
             end
         end
 
+
+        function dialogCompressor(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Compressor', 520, 280, ...
+                {{'Inlet:','dropdown',sNames},{'Outlet:','dropdown',sNames}, ...
+                 {'Mode (PoutEta/PREta/Power):','text','PoutEta'}, ...
+                 {'Pout (Pa):','numeric',2e5},{'PR:','numeric',2.0}, ...
+                 {'Eta_isentropic:','numeric',0.75},{'Power (kW):','numeric',100}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name)); ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=char(u.mode); ctrls{4}.Value=u.Pout; ctrls{5}.Value=u.PR;
+                ctrls{6}.Value=u.eta_isentropic; ctrls{7}.Value=u.power_kW;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','Compressor','inlet',ctrls{1}.Value,'outlet',ctrls{2}.Value, ...
+                    'mode',string(ctrls{3}.Value),'Pout',ctrls{4}.Value,'PR',ctrls{5}.Value, ...
+                    'eta_isentropic',ctrls{6}.Value,'power_kW',ctrls{7}.Value);
+                u=proc.units.Compressor(app.findStream(def.inlet),app.findStream(def.outlet),def);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogTurbine(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Turbine', 520, 280, ...
+                {{'Inlet:','dropdown',sNames},{'Outlet:','dropdown',sNames}, ...
+                 {'Mode (PoutEta/PREta/Power):','text','PoutEta'}, ...
+                 {'Pout (Pa):','numeric',1e5},{'PR:','numeric',2.0}, ...
+                 {'Eta_isentropic:','numeric',0.75},{'Power (kW):','numeric',100}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name)); ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=char(u.mode); ctrls{4}.Value=u.Pout; ctrls{5}.Value=u.PR;
+                ctrls{6}.Value=u.eta_isentropic; ctrls{7}.Value=u.power_kW;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','Turbine','inlet',ctrls{1}.Value,'outlet',ctrls{2}.Value, ...
+                    'mode',string(ctrls{3}.Value),'Pout',ctrls{4}.Value,'PR',ctrls{5}.Value, ...
+                    'eta_isentropic',ctrls{6}.Value,'power_kW',ctrls{7}.Value);
+                u=proc.units.Turbine(app.findStream(def.inlet),app.findStream(def.outlet),def);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogHeater(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Heater', 500, 230, ...
+                {{'Inlet:','dropdown',sNames},{'Outlet:','dropdown',sNames}, ...
+                 {'Spec Mode (Tout/Duty):','text','Tout'},{'Tout (K):','numeric',350}, ...
+                 {'Duty (kW):','numeric',100}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name)); ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=char(u.specMode); ctrls{4}.Value=u.Tout; ctrls{5}.Value=u.duty_kW;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','Heater','inlet',ctrls{1}.Value,'outlet',ctrls{2}.Value, ...
+                    'specMode',string(ctrls{3}.Value),'Tout',ctrls{4}.Value,'duty_kW',ctrls{5}.Value);
+                u=proc.units.Heater(app.findStream(def.inlet),app.findStream(def.outlet),def);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogCooler(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Cooler', 500, 230, ...
+                {{'Inlet:','dropdown',sNames},{'Outlet:','dropdown',sNames}, ...
+                 {'Spec Mode (Tout/Duty):','text','Tout'},{'Tout (K):','numeric',280}, ...
+                 {'Duty (kW):','numeric',-100}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name)); ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=char(u.specMode); ctrls{4}.Value=u.Tout; ctrls{5}.Value=u.duty_kW;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','Cooler','inlet',ctrls{1}.Value,'outlet',ctrls{2}.Value, ...
+                    'specMode',string(ctrls{3}.Value),'Tout',ctrls{4}.Value,'duty_kW',ctrls{5}.Value);
+                u=proc.units.Cooler(app.findStream(def.inlet),app.findStream(def.outlet),def);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogHeatExchanger(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Heat Exchanger', 540, 320, ...
+                {{'Hot In:','dropdown',sNames},{'Hot Out:','dropdown',sNames}, ...
+                 {'Cold In:','dropdown',sNames},{'Cold Out:','dropdown',sNames}, ...
+                 {'Q (kW):','numeric',0},{'Duty specified (0/1):','numeric',0}, ...
+                 {'Hot out T (NaN if free):','numeric',NaN}, ...
+                 {'Cold out T (NaN if free):','numeric',NaN}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.hotIn.name)); ctrls{2}.Value=char(string(u.hotOut.name));
+                ctrls{3}.Value=char(string(u.coldIn.name)); ctrls{4}.Value=char(string(u.coldOut.name));
+                ctrls{5}.Value=u.Q_kW; ctrls{6}.Value=double(u.dutySpecified);
+                ctrls{7}.Value=u.hotOutT; ctrls{8}.Value=u.coldOutT;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','HeatExchanger','hotIn',ctrls{1}.Value,'hotOut',ctrls{2}.Value, ...
+                    'coldIn',ctrls{3}.Value,'coldOut',ctrls{4}.Value,'Q_kW',ctrls{5}.Value, ...
+                    'dutySpecified',logical(ctrls{6}.Value),'hotOutT',ctrls{7}.Value,'coldOutT',ctrls{8}.Value);
+                u=proc.units.HeatExchanger(app.findStream(def.hotIn),app.findStream(def.hotOut), ...
+                    app.findStream(def.coldIn),app.findStream(def.coldOut),def);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
         function saveConfigDialog(app)
             [file, path] = uiputfile('*.mat', 'Save Config', 'mathlab_config.mat');
             if isequal(file, 0), return; end
@@ -2007,6 +2135,36 @@ classdef MathLabApp < handle
                     s = app.findStream(def.stream);
                     if ~isempty(s)
                         u = proc.units.Constraint(s, def.field, def.value, def.index);
+                    end
+                case 'Compressor'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.Compressor(sIn, sOut, def);
+                    end
+                case 'Turbine'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.Turbine(sIn, sOut, def);
+                    end
+                case 'Heater'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.Heater(sIn, sOut, def);
+                    end
+                case 'Cooler'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.Cooler(sIn, sOut, def);
+                    end
+                case 'HeatExchanger'
+                    hIn = app.findStream(def.hotIn); hOut = app.findStream(def.hotOut);
+                    cIn = app.findStream(def.coldIn); cOut = app.findStream(def.coldOut);
+                    if ~isempty(hIn) && ~isempty(hOut) && ~isempty(cIn) && ~isempty(cOut)
+                        u = proc.units.HeatExchanger(hIn, hOut, cIn, cOut, def);
                     end
             end
         end
@@ -2358,7 +2516,7 @@ classdef MathLabApp < handle
 
         function def = rewriteDefStreams(app, def, aliasByOutlet)
             fnSingles = {'inlet','source','stream','tear','processInlet','bypassStream','processReturn', ...
-                'lhsStream','aStream','bStream','recycle','purge','outlet','outletA','outletB'};
+                'lhsStream','aStream','bStream','recycle','purge','outlet','outletA','outletB','hotIn','hotOut','coldIn','coldOut'};
             for i = 1:numel(fnSingles)
                 f = fnSingles{i};
                 if ~isfield(def, f)
