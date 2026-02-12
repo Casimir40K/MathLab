@@ -50,8 +50,7 @@ classdef Reactor < handle
             n_out = sum(n_species);
             y_out = n_species / n_out;
 
-            % Step 4: Build residuals
-            eqs(end+1) = obj.outlet.n_dot - n_out;
+            % Step 4: Build residuals from component balances
             for j = 1:nspecies
                 eqs(end+1) = obj.outlet.n_dot * obj.outlet.y(j) - n_out * y_out(j);
             end

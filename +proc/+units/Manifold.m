@@ -20,9 +20,8 @@ classdef Manifold < handle
             for k = 1:nOut
                 src = obj.inlets{obj.route(k)};
                 out = obj.outlets{k};
-                eqs(end+1) = out.n_dot - src.n_dot;
                 for i = 1:ns
-                    eqs(end+1) = out.y(i) - src.y(i);
+                    eqs(end+1) = out.n_dot * out.y(i) - src.n_dot * src.y(i);
                 end
             end
         end

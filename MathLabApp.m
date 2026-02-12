@@ -326,7 +326,12 @@ classdef MathLabApp < handle
                     'DesignSpec', ...
                     'Adjust', ...
                     'Calculator', ...
-                    'Constraint' ...
+                    'Constraint', ...
+                    'Compressor', ...
+                    'Turbine', ...
+                    'Heater', ...
+                    'Cooler', ...
+                    'HeatExchanger' ...
                 }, ...
                 'Value', 'Mixer');
             app.AddUnitBtn = uibutton(addRow,'push','Text','Add Unit...', ...
@@ -717,9 +722,18 @@ classdef MathLabApp < handle
         end
 
         function fs = buildFlowsheet(app)
+            [resolvedDefs, aliasByOutlet] = app.resolveIdentityLinks(app.unitDefs);
             fs = proc.Flowsheet(app.speciesNames);
-            for i = 1:numel(app.streams), fs.addStream(app.streams{i}); end
-            for i = 1:numel(app.units),   fs.addUnit(app.units{i}); end
+            for i = 1:numel(app.streams)
+                fs.addStream(app.streams{i});
+            end
+            app.addStreamAliasesToFlowsheet(fs, aliasByOutlet);
+            for i = 1:numel(resolvedDefs)
+                u = app.buildUnitFromDef(resolvedDefs{i}, 'includeIdentityLink', false);
+                if ~isempty(u)
+                    fs.addUnit(u);
+                end
+            end
         end
     end
 
@@ -781,6 +795,11 @@ classdef MathLabApp < handle
                 case 'Adjust',    app.dialogAdjust(sNames);
                 case 'Calculator', app.dialogCalculator(sNames);
                 case 'Constraint', app.dialogConstraint(sNames);
+                case 'Compressor', app.dialogCompressor(sNames);
+                case 'Turbine', app.dialogTurbine(sNames);
+                case 'Heater', app.dialogHeater(sNames);
+                case 'Cooler', app.dialogCooler(sNames);
+                case 'HeatExchanger', app.dialogHeatExchanger(sNames);
             end
         end
 
@@ -808,6 +827,11 @@ classdef MathLabApp < handle
             elseif contains(cn,'Adjust'), app.dialogAdjust(sNames,idx);
             elseif contains(cn,'Calculator'), app.dialogCalculator(sNames,idx);
             elseif contains(cn,'Constraint'), app.dialogConstraint(sNames,idx);
+            elseif contains(cn,'Compressor'), app.dialogCompressor(sNames,idx);
+            elseif contains(cn,'Turbine'), app.dialogTurbine(sNames,idx);
+            elseif contains(cn,'Heater'), app.dialogHeater(sNames,idx);
+            elseif contains(cn,'Cooler'), app.dialogCooler(sNames,idx);
+            elseif contains(cn,'HeatExchanger'), app.dialogHeatExchanger(sNames,idx);
             end
         end
 
@@ -1686,6 +1710,119 @@ classdef MathLabApp < handle
             end
         end
 
+
+        function dialogCompressor(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Compressor', 520, 280, ...
+                {{'Inlet:','dropdown',sNames},{'Outlet:','dropdown',sNames}, ...
+                 {'Mode (PoutEta/PREta/Power):','text','PoutEta'}, ...
+                 {'Pout (Pa):','numeric',2e5},{'PR:','numeric',2.0}, ...
+                 {'Eta_isentropic:','numeric',0.75},{'Power (kW):','numeric',100}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name)); ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=char(u.mode); ctrls{4}.Value=u.Pout; ctrls{5}.Value=u.PR;
+                ctrls{6}.Value=u.eta_isentropic; ctrls{7}.Value=u.power_kW;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','Compressor','inlet',ctrls{1}.Value,'outlet',ctrls{2}.Value, ...
+                    'mode',string(ctrls{3}.Value),'Pout',ctrls{4}.Value,'PR',ctrls{5}.Value, ...
+                    'eta_isentropic',ctrls{6}.Value,'power_kW',ctrls{7}.Value);
+                u=proc.units.Compressor(app.findStream(def.inlet),app.findStream(def.outlet),def);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogTurbine(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Turbine', 520, 280, ...
+                {{'Inlet:','dropdown',sNames},{'Outlet:','dropdown',sNames}, ...
+                 {'Mode (PoutEta/PREta/Power):','text','PoutEta'}, ...
+                 {'Pout (Pa):','numeric',1e5},{'PR:','numeric',2.0}, ...
+                 {'Eta_isentropic:','numeric',0.75},{'Power (kW):','numeric',100}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name)); ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=char(u.mode); ctrls{4}.Value=u.Pout; ctrls{5}.Value=u.PR;
+                ctrls{6}.Value=u.eta_isentropic; ctrls{7}.Value=u.power_kW;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','Turbine','inlet',ctrls{1}.Value,'outlet',ctrls{2}.Value, ...
+                    'mode',string(ctrls{3}.Value),'Pout',ctrls{4}.Value,'PR',ctrls{5}.Value, ...
+                    'eta_isentropic',ctrls{6}.Value,'power_kW',ctrls{7}.Value);
+                u=proc.units.Turbine(app.findStream(def.inlet),app.findStream(def.outlet),def);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogHeater(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Heater', 500, 230, ...
+                {{'Inlet:','dropdown',sNames},{'Outlet:','dropdown',sNames}, ...
+                 {'Spec Mode (Tout/Duty):','text','Tout'},{'Tout (K):','numeric',350}, ...
+                 {'Duty (kW):','numeric',100}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name)); ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=char(u.specMode); ctrls{4}.Value=u.Tout; ctrls{5}.Value=u.duty_kW;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','Heater','inlet',ctrls{1}.Value,'outlet',ctrls{2}.Value, ...
+                    'specMode',string(ctrls{3}.Value),'Tout',ctrls{4}.Value,'duty_kW',ctrls{5}.Value);
+                u=proc.units.Heater(app.findStream(def.inlet),app.findStream(def.outlet),def);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogCooler(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Cooler', 500, 230, ...
+                {{'Inlet:','dropdown',sNames},{'Outlet:','dropdown',sNames}, ...
+                 {'Spec Mode (Tout/Duty):','text','Tout'},{'Tout (K):','numeric',280}, ...
+                 {'Duty (kW):','numeric',-100}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.inlet.name)); ctrls{2}.Value=char(string(u.outlet.name));
+                ctrls{3}.Value=char(u.specMode); ctrls{4}.Value=u.Tout; ctrls{5}.Value=u.duty_kW;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','Cooler','inlet',ctrls{1}.Value,'outlet',ctrls{2}.Value, ...
+                    'specMode',string(ctrls{3}.Value),'Tout',ctrls{4}.Value,'duty_kW',ctrls{5}.Value);
+                u=proc.units.Cooler(app.findStream(def.inlet),app.findStream(def.outlet),def);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
+        function dialogHeatExchanger(app, sNames, editIdx)
+            if nargin<3, editIdx=[]; end
+            [d, ctrls] = app.makeDialog('Configure Heat Exchanger', 540, 320, ...
+                {{'Hot In:','dropdown',sNames},{'Hot Out:','dropdown',sNames}, ...
+                 {'Cold In:','dropdown',sNames},{'Cold Out:','dropdown',sNames}, ...
+                 {'Q (kW):','numeric',0},{'Duty specified (0/1):','numeric',0}, ...
+                 {'Hot out T (NaN if free):','numeric',NaN}, ...
+                 {'Cold out T (NaN if free):','numeric',NaN}});
+            if ~isempty(editIdx)
+                u=app.units{editIdx};
+                ctrls{1}.Value=char(string(u.hotIn.name)); ctrls{2}.Value=char(string(u.hotOut.name));
+                ctrls{3}.Value=char(string(u.coldIn.name)); ctrls{4}.Value=char(string(u.coldOut.name));
+                ctrls{5}.Value=u.Q_kW; ctrls{6}.Value=double(u.dutySpecified);
+                ctrls{7}.Value=u.hotOutT; ctrls{8}.Value=u.coldOutT;
+            end
+            app.addDialogButtons(d,@okCb);
+            function okCb()
+                def=struct('type','HeatExchanger','hotIn',ctrls{1}.Value,'hotOut',ctrls{2}.Value, ...
+                    'coldIn',ctrls{3}.Value,'coldOut',ctrls{4}.Value,'Q_kW',ctrls{5}.Value, ...
+                    'dutySpecified',logical(ctrls{6}.Value),'hotOutT',ctrls{7}.Value,'coldOutT',ctrls{8}.Value);
+                u=proc.units.HeatExchanger(app.findStream(def.hotIn),app.findStream(def.hotOut), ...
+                    app.findStream(def.coldIn),app.findStream(def.coldOut),def);
+                app.commitUnit(u,def,editIdx); delete(d);
+            end
+        end
+
         function saveConfigDialog(app)
             [file, path] = uiputfile('*.mat', 'Save Config', 'mathlab_config.mat');
             if isequal(file, 0), return; end
@@ -1843,10 +1980,17 @@ classdef MathLabApp < handle
             end
         end
 
-        function u = buildUnitFromDef(app, def)
+        function u = buildUnitFromDef(app, def, varargin)
             u = [];
+            p = inputParser;
+            p.addParameter('includeIdentityLink', true, @(x)islogical(x)&&isscalar(x));
+            p.parse(varargin{:});
+            includeIdentityLink = p.Results.includeIdentityLink;
             switch def.type
                 case 'Link'
+                    if app.isIdentityLinkDef(def) && ~includeIdentityLink
+                        return;
+                    end
                     sIn = app.findStream(def.inlet);
                     sOut = app.findStream(def.outlet);
                     if ~isempty(sIn) && ~isempty(sOut)
@@ -1992,6 +2136,36 @@ classdef MathLabApp < handle
                     if ~isempty(s)
                         u = proc.units.Constraint(s, def.field, def.value, def.index);
                     end
+                case 'Compressor'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.Compressor(sIn, sOut, def);
+                    end
+                case 'Turbine'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.Turbine(sIn, sOut, def);
+                    end
+                case 'Heater'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.Heater(sIn, sOut, def);
+                    end
+                case 'Cooler'
+                    sIn = app.findStream(def.inlet);
+                    sOut = app.findStream(def.outlet);
+                    if ~isempty(sIn) && ~isempty(sOut)
+                        u = proc.units.Cooler(sIn, sOut, def);
+                    end
+                case 'HeatExchanger'
+                    hIn = app.findStream(def.hotIn); hOut = app.findStream(def.hotOut);
+                    cIn = app.findStream(def.coldIn); cOut = app.findStream(def.coldOut);
+                    if ~isempty(hIn) && ~isempty(hOut) && ~isempty(cIn) && ~isempty(cOut)
+                        u = proc.units.HeatExchanger(hIn, hOut, cIn, cOut, def);
+                    end
             end
         end
 
@@ -2037,7 +2211,13 @@ classdef MathLabApp < handle
                     def = cfg.unitDefs{i};
                     switch def.type
                         case 'Link'
-                            fprintf(fid, 'fs.addUnit(proc.units.Link(%s, %s));\n', def.inlet, def.outlet);
+                            isIdentityLink = ~(isfield(def, 'mode') && ~strcmp(def.mode, 'identity'));
+                            if isfield(def, 'isIdentity')
+                                isIdentityLink = logical(def.isIdentity);
+                            end
+                            if ~isIdentityLink
+                                fprintf(fid, 'fs.addUnit(proc.units.Link(%s, %s));\n', def.inlet, def.outlet);
+                            end
                         case 'Mixer'
                             inStr = strjoin(cellfun(@(n) n, def.inlets, 'Uni',false), ', ');
                             fprintf(fid, 'fs.addUnit(proc.units.Mixer({%s}, %s));\n', inStr, def.outlet);
@@ -2314,6 +2494,85 @@ classdef MathLabApp < handle
     %  HELPERS
     % =====================================================================
     methods (Access = private)
+        function [resolvedDefs, aliasByOutlet] = resolveIdentityLinks(app, unitDefs)
+            aliasByOutlet = containers.Map('KeyType','char','ValueType','char');
+            resolvedDefs = cell(size(unitDefs));
+            for i = 1:numel(unitDefs)
+                def = unitDefs{i};
+                if ~isstruct(def)
+                    resolvedDefs{i} = def;
+                    continue;
+                end
+                def = app.rewriteDefStreams(def, aliasByOutlet);
+                if strcmp(def.type, 'Link') && app.isIdentityLinkDef(def)
+                    inletRoot = app.resolveAliasName(def.inlet, aliasByOutlet);
+                    aliasByOutlet(char(def.outlet)) = inletRoot;
+                    continue;
+                end
+                resolvedDefs{i} = def;
+            end
+            resolvedDefs = resolvedDefs(~cellfun(@isempty, resolvedDefs));
+        end
+
+        function def = rewriteDefStreams(app, def, aliasByOutlet)
+            fnSingles = {'inlet','source','stream','tear','processInlet','bypassStream','processReturn', ...
+                'lhsStream','aStream','bStream','recycle','purge','outlet','outletA','outletB','hotIn','hotOut','coldIn','coldOut'};
+            for i = 1:numel(fnSingles)
+                f = fnSingles{i};
+                if ~isfield(def, f)
+                    continue;
+                end
+                if strcmp(f, 'outlet') && strcmp(def.type, 'Link') && app.isIdentityLinkDef(def)
+                    continue;
+                end
+                def.(f) = app.resolveAliasName(def.(f), aliasByOutlet);
+            end
+            if isfield(def, 'inlets')
+                for k = 1:numel(def.inlets)
+                    def.inlets{k} = app.resolveAliasName(def.inlets{k}, aliasByOutlet);
+                end
+            end
+            if isfield(def, 'outlets')
+                for k = 1:numel(def.outlets)
+                    def.outlets{k} = app.resolveAliasName(def.outlets{k}, aliasByOutlet);
+                end
+            end
+        end
+
+        function addStreamAliasesToFlowsheet(app, fs, aliasByOutlet)
+            if isempty(aliasByOutlet)
+                return;
+            end
+            keys = aliasByOutlet.keys;
+            for i = 1:numel(keys)
+                aliasName = keys{i};
+                targetName = aliasByOutlet(aliasName);
+                s = app.findStream(targetName);
+                if ~isempty(s)
+                    fs.addAlias(aliasName, s);
+                end
+            end
+        end
+
+        function tf = isIdentityLinkDef(~, def)
+            tf = strcmp(def.type, 'Link') && ~(isfield(def, 'mode') && ~strcmp(def.mode, 'identity'));
+            if isfield(def, 'isIdentity')
+                tf = logical(def.isIdentity);
+            end
+        end
+
+        function outName = resolveAliasName(~, name, aliasByOutlet)
+            outName = char(string(name));
+            visited = containers.Map('KeyType','char','ValueType','logical');
+            while isKey(aliasByOutlet, outName)
+                if isKey(visited, outName)
+                    break;
+                end
+                visited(outName) = true;
+                outName = aliasByOutlet(outName);
+            end
+        end
+
         function names = getStreamNames(app)
             names = cellfun(@(s) char(string(s.name)), app.streams, 'Uni', false);
         end
