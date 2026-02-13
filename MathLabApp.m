@@ -61,6 +61,9 @@ classdef MathLabApp < handle
         % -- Tab 5: Results --
         ResultsTab
         ResultsTable
+        ResultsShowAliasesCheck
+        ResultsShowAliasColumnCheck
+        ResultsNameModeLabel
 
         % -- Tab 6: Sensitivity --
         SensTab
@@ -460,8 +463,26 @@ classdef MathLabApp < handle
         function buildResultsTab(app)
             t = uitab(app.Tabs, 'Title', ' Results ');
             app.ResultsTab = t;
-            gl = uigridlayout(t, [1 1], 'Padding',[12 12 12 12]);
+            gl = uigridlayout(t, [3 1], 'RowHeight',{30,24,'1x'}, ...
+                'Padding',[12 12 12 12], 'RowSpacing',6);
+
+            ctrlG = uigridlayout(gl, [1 2], 'ColumnWidth',{'fit','fit'}, ...
+                'Padding',[0 0 0 0], 'ColumnSpacing',12);
+            ctrlG.Layout.Row = 1;
+            app.ResultsShowAliasesCheck = uicheckbox(ctrlG, ...
+                'Text','Show alias rows', 'Value', false, ...
+                'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsShowAliasColumnCheck = uicheckbox(ctrlG, ...
+                'Text','Show alias names column', 'Value', true, ...
+                'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+
+            app.ResultsNameModeLabel = uilabel(gl, ...
+                'Text','Default view: one canonical stream row per handle. Aliases are hidden unless enabled.', ...
+                'FontColor',[0.35 0.35 0.35], 'FontAngle','italic');
+            app.ResultsNameModeLabel.Layout.Row = 2;
+
             app.ResultsTable = uitable(gl);
+            app.ResultsTable.Layout.Row = 3;
         end
 
         % ================================================================
@@ -500,7 +521,7 @@ classdef MathLabApp < handle
             app.SensMaxField = uieditfield(rangeG,'numeric','Value',0.9);
             app.SensNptsField = uieditfield(rangeG,'numeric','Value',15, ...
                 'Limits',[2 200],'RoundFractionalValues','on');
-            uilabel(topG,'Text','Output stream:','FontWeight','bold');
+            uilabel(topG,'Text','Output stream (canonical):','FontWeight','bold');
             app.SensOutputStreamDD = uidropdown(topG,'Items',{'(none)'},'Value','(none)');
 
             % Row 3
@@ -1677,9 +1698,7 @@ classdef MathLabApp < handle
 
                 app.LogArea.Value = cellstr(solver.logLines);
 
-                T = fs.streamTable();
-                app.ResultsTable.Data = T;
-                app.ResultsTable.ColumnName = T.Properties.VariableNames;
+                app.refreshResultsTable();
 
                 app.refreshStreamTables();
                 app.setStatus('Solve completed.');
@@ -1693,6 +1712,36 @@ classdef MathLabApp < handle
                 app.setStatus('Solve failed — see log (saved to output/logs).');
             end
         end
+
+
+        function refreshResultsTable(app)
+            if isempty(app.lastFlowsheet)
+                app.ResultsTable.Data = table();
+                app.ResultsTable.ColumnName = {};
+                return;
+            end
+
+            includeAliases = ~isempty(app.ResultsShowAliasesCheck) && app.ResultsShowAliasesCheck.Value;
+            showAliasColumn = true;
+            if ~isempty(app.ResultsShowAliasColumnCheck)
+                showAliasColumn = app.ResultsShowAliasColumnCheck.Value;
+            end
+
+            T = app.lastFlowsheet.streamTable( ...
+                'includeAliases', includeAliases, ...
+                'showAliasColumn', showAliasColumn);
+            app.ResultsTable.Data = T;
+            app.ResultsTable.ColumnName = T.Properties.VariableNames;
+
+            if includeAliases
+                app.ResultsNameModeLabel.Text = 'Alias rows are enabled: a single stream handle may appear more than once under different names.';
+            elseif showAliasColumn
+                app.ResultsNameModeLabel.Text = 'Canonical rows shown. Alias names (if any) are listed in the aliases column.';
+            else
+                app.ResultsNameModeLabel.Text = 'Canonical rows shown. Enable alias rows or the aliases column to view alternate names.';
+            end
+        end
+
     end
 
 
@@ -1718,7 +1767,7 @@ classdef MathLabApp < handle
                 'Padding',[0 0 0 0], 'ColumnSpacing',6);
             topG.Layout.Row = 1;
             uilabel(topG, 'Text','Unit Table (Read-only)', 'FontWeight','bold', 'FontSize',13);
-            uilabel(topG, 'Text','Type + connected streams + key specs are flattened for quick review.', ...
+            uilabel(topG, 'Text','Type + connected streams + key specs are flattened for quick review (canonical stream names).', ...
                 'FontColor',[0.35 0.35 0.35]);
             uibutton(topG, 'push', 'Text','Export CSV', ...
                 'ButtonPushedFcn',@(~,~) app.exportUnitTableToOutput('csv'));
@@ -2247,7 +2296,7 @@ classdef MathLabApp < handle
             filepath = fullfile(outDir, fname);
             solverData = app.lastSolver; %#ok
             if ~isempty(app.lastFlowsheet)
-                streamTable = app.lastFlowsheet.streamTable(); %#ok
+                streamTable = app.lastFlowsheet.streamTable('showAliasColumn', true); %#ok
                 save(filepath, 'solverData', 'streamTable');
             else
                 save(filepath, 'solverData');

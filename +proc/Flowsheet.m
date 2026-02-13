@@ -87,9 +87,25 @@ classdef Flowsheet < handle
             solver.solve();
         end
 
-        function T = streamTable(obj)
+        function T = streamTable(obj, varargin)
             % Table including: name, n_dot, T, P, y_i, and species molar flows n_i = n_dot*y_i
-            N  = numel(obj.streamDisplayRefs);
+            %
+            % Options:
+            %   'includeAliases' (default false): include one row for every
+            %       display name (aliases included).
+            %   'showAliasColumn' (default false): when aliases are suppressed,
+            %       append an aliases column that lists additional names.
+            p = inputParser;
+            p.addParameter('includeAliases', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('showAliasColumn', false, @(x)islogical(x)&&isscalar(x));
+            p.parse(varargin{:});
+
+            includeAliases = p.Results.includeAliases;
+            showAliasColumn = p.Results.showAliasColumn;
+
+            [displayNames, displayRefs, aliasNames] = obj.selectStreamDisplayRows(includeAliases);
+
+            N  = numel(displayRefs);
             ns = numel(obj.species);
 
             names = strings(N,1);
@@ -100,8 +116,8 @@ classdef Flowsheet < handle
             Ni    = nan(N,ns);
 
             for i = 1:N
-                s = obj.streamDisplayRefs{i};
-                names(i) = string(obj.streamDisplayNames{i});
+                s = displayRefs{i};
+                names(i) = string(displayNames{i});
                 n_dot(i) = s.n_dot;
                 TT(i)    = s.T;
                 PP(i)    = s.P;
@@ -120,10 +136,52 @@ classdef Flowsheet < handle
             for j = 1:ns
                 T.(sprintf('n_%s', obj.species{j})) = Ni(:,j);
             end
+
+            if showAliasColumn && ~includeAliases
+                aliases = strings(N,1);
+                for i = 1:N
+                    aliases(i) = string(strjoin(aliasNames{i}, ', '));
+                end
+                T.aliases = aliases;
+            end
         end
     end
 
     methods (Access = private)
+        function [names, refs, aliasNames] = selectStreamDisplayRows(obj, includeAliases)
+            names = {};
+            refs = {};
+            aliasNames = {};
+
+            if includeAliases
+                names = obj.streamDisplayNames;
+                refs = obj.streamDisplayRefs;
+                aliasNames = repmat({{}}, numel(names), 1);
+                return;
+            end
+
+            for i = 1:numel(obj.streamDisplayRefs)
+                s = obj.streamDisplayRefs{i};
+                thisName = char(string(obj.streamDisplayNames{i}));
+                matchIdx = 0;
+                for j = 1:numel(refs)
+                    if isequal(refs{j}, s)
+                        matchIdx = j;
+                        break;
+                    end
+                end
+
+                if matchIdx == 0
+                    names{end+1} = thisName; %#ok<AGROW>
+                    refs{end+1} = s; %#ok<AGROW>
+                    aliasNames{end+1} = {}; %#ok<AGROW>
+                else
+                    aliasNames{matchIdx}{end+1} = thisName;
+                end
+            end
+            aliasNames = reshape(aliasNames, [], 1);
+        end
+
         function n = countUnknowns(obj)
             ns = numel(obj.species);
             n = 0;
