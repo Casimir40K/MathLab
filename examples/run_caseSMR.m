@@ -68,23 +68,43 @@ streamDefs = {
     'S20_CO2_export',         840,             318,       110e5,    [0.03 0.01 0.93 0.02 0.005 0.005], false, false, false, false;
 };
 
-cfg.streams = repmat(struct(), size(streamDefs,1), 1);
+% --- FIX: preallocate cfg.streams with consistent fields ---
+sdTemplate = struct( ...
+    'name',        '', ...
+    'n_dot',       NaN, ...
+    'T',           NaN, ...
+    'P',           NaN, ...
+    'y',           zeros(1, ns), ...
+    'known_n_dot', false, ...
+    'known_T',     false, ...
+    'known_P',     false, ...
+    'known_y',     false(1, ns) ...
+);
+
+cfg.streams = repmat(sdTemplate, size(streamDefs,1), 1);
+
 for i = 1:size(streamDefs, 1)
+    sd = sdTemplate;  % ensures identical fields every iteration
+
     sd.name        = streamDefs{i,1};
     sd.n_dot       = streamDefs{i,2};
     sd.T           = streamDefs{i,3};
     sd.P           = streamDefs{i,4};
+
     y = streamDefs{i,5};
     y = y ./ sum(y);
     sd.y           = y;
+
     sd.known_n_dot = streamDefs{i,6};
     sd.known_T     = streamDefs{i,7};
     sd.known_P     = streamDefs{i,8};
+
     if streamDefs{i,9}
         sd.known_y = true(1, ns);
     else
         sd.known_y = false(1, ns);
     end
+
     cfg.streams(i) = sd;
 end
 
@@ -92,10 +112,11 @@ end
 unitDefs = {};
 
 % U1 Turbine/depressurization representation: inlet conditioning
+u = struct();
 u.type = 'Turbine';
 u.inlet = 'S01_NG_feed';
 u.outlet = 'S02_desulfurized';
-u.PR = 1.02;      % minimal drop placeholder
+u.Pout = 9.8e5;   % slight pressure drop placeholder
 u.eta = 0.85;
 unitDefs{end+1} = u;
 
@@ -200,10 +221,10 @@ unitDefs{end+1} = u;
 
 % U12 PSA feed trim (pressure matching)
 u = struct();
-u.type = 'Compressor';
+u.type = 'Turbine';
 u.inlet = 'S13_flash_gas';
 u.outlet = 'S15_psa_feed';
-u.PR = 0.97;  % pseudo pressure adjustment placeholder
+u.PR = 1.03;  % mild letdown before PSA train
 u.eta = 0.80;
 unitDefs{end+1} = u;
 
@@ -244,6 +265,14 @@ cfg.unitDefs = unitDefs;
 %% Solver settings
 cfg.maxIter = 250;
 cfg.tolAbs  = 1e-8;
+
+
+% Basic guardrails for config integrity
+for i = 1:numel(cfg.streams)
+    if abs(sum(cfg.streams(i).y) - 1.0) > 1e-10
+        error('Stream %s has mole fractions that do not sum to one.', cfg.streams(i).name);
+    end
+end
 
 save(outFile, '-struct', 'cfg');
 
