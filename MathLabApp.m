@@ -77,6 +77,28 @@ classdef MathLabApp < handle
         ResultsConfig2NormCheck
         ResultsConfig2ScaleField
         ResultsConfig2AxisDD
+        ResultsConfig3XVarDD
+        ResultsConfig3YVarDD
+        ResultsConfig3TargetDD
+        ResultsConfig3CompDD
+        ResultsConfig3NormCheck
+        ResultsConfig3ScaleField
+        ResultsConfig3AxisDD
+        ResultsConfig4XVarDD
+        ResultsConfig4YVarDD
+        ResultsConfig4TargetDD
+        ResultsConfig4CompDD
+        ResultsConfig4NormCheck
+        ResultsConfig4ScaleField
+        ResultsConfig4AxisDD
+        ResultsPresetDD
+        ResultsApplyPresetBtn
+        ResultsSmoothingDD
+        ResultsSmoothWindowField
+        ResultsNormModeDD
+        ResultsLegendDD
+        ResultsExportBtn
+        ResultsResetBtn
         ResultsPlotStatusLabel
         OpenStreamTableBtn
 
@@ -516,36 +538,83 @@ classdef MathLabApp < handle
         function buildResultsTab(app)
             t = uitab(app.Tabs, 'Title', ' Results ');
             app.ResultsTab = t;
-            gl = uigridlayout(t, [3 1], 'RowHeight',{130,28,'1x'}, ...
+            gl = uigridlayout(t, [3 1], 'RowHeight',{180,66,'1x'}, ...
                 'Padding',[12 12 12 12], 'RowSpacing',8);
 
-            topG = uigridlayout(gl, [2 8], 'ColumnWidth',{'fit','1x','1x',90,80,100,70,'1x'}, ...
-                'Padding',[0 0 0 0], 'ColumnSpacing',8);
+            varsAll = {'iteration','residual','flow','T','P','conversion','efficiency','duty','power','y(i)', ...
+                'deltaT_hx','power_specific','conversion_profile'};
+            varsY = varsAll(2:end);
+            headerItems = {'Trace','X','Y','Axis','Scale','Normalize','Comp','Target'};
+
+            topG = uigridlayout(gl, [5 8], 'ColumnWidth',{'fit',120,120,80,75,85,70,'1x'}, ...
+                'RowHeight',{22,26,26,26,26}, 'Padding',[0 0 0 0], 'ColumnSpacing',7, 'RowSpacing',4);
             topG.Layout.Row = 1;
-            uilabel(topG, 'Text','Plot 1', 'FontWeight','bold');
-            app.ResultsConfig1XVarDD = uidropdown(topG, 'Items',{'iteration','flow','T','P','conversion','efficiency','duty','power','y(i)'}, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig1YVarDD = uidropdown(topG, 'Items',{'flow','T','P','conversion','efficiency','duty','power','y(i)'}, 'Value','flow', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            for c = 1:numel(headerItems)
+                uilabel(topG, 'Text', headerItems{c}, 'FontWeight','bold');
+            end
+
+            uilabel(topG, 'Text','Plot 1');
+            app.ResultsConfig1XVarDD = uidropdown(topG, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1YVarDD = uidropdown(topG, 'Items',varsY, 'Value','flow', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsConfig1AxisDD = uidropdown(topG, 'Items',{'left','right'}, 'Value','left', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsConfig1ScaleField = uieditfield(topG, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig1NormCheck = uicheckbox(topG, 'Text','normalize', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1NormCheck = uicheckbox(topG, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsConfig1CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsConfig1TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
 
-            uilabel(topG, 'Text','Plot 2', 'FontWeight','bold');
-            app.ResultsConfig2XVarDD = uidropdown(topG, 'Items',{'iteration','flow','T','P','conversion','efficiency','duty','power','y(i)'}, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig2YVarDD = uidropdown(topG, 'Items',{'flow','T','P','conversion','efficiency','duty','power','y(i)'}, 'Value','T', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            uilabel(topG, 'Text','Plot 2');
+            app.ResultsConfig2XVarDD = uidropdown(topG, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2YVarDD = uidropdown(topG, 'Items',varsY, 'Value','T', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsConfig2AxisDD = uidropdown(topG, 'Items',{'left','right'}, 'Value','right', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsConfig2ScaleField = uieditfield(topG, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig2NormCheck = uicheckbox(topG, 'Text','normalize', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2NormCheck = uicheckbox(topG, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsConfig2CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsConfig2TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
 
-            midG = uigridlayout(gl, [1 7], 'ColumnWidth',{'fit',120,'fit',120,170,'1x','fit'}, 'Padding',[0 0 0 0], 'ColumnSpacing',8);
+            uilabel(topG, 'Text','Plot 3');
+            app.ResultsConfig3XVarDD = uidropdown(topG, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig3YVarDD = uidropdown(topG, 'Items',varsY, 'Value','residual', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig3AxisDD = uidropdown(topG, 'Items',{'left','right'}, 'Value','left', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig3ScaleField = uieditfield(topG, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig3NormCheck = uicheckbox(topG, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig3CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig3TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+
+            uilabel(topG, 'Text','Plot 4');
+            app.ResultsConfig4XVarDD = uidropdown(topG, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig4YVarDD = uidropdown(topG, 'Items',varsY, 'Value','power', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig4AxisDD = uidropdown(topG, 'Items',{'left','right'}, 'Value','right', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig4ScaleField = uieditfield(topG, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig4NormCheck = uicheckbox(topG, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig4CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig4TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+
+            midG = uigridlayout(gl, [2 8], 'ColumnWidth',{'fit',140,'fit',130,'fit',120,'fit','1x'}, ...
+                'Padding',[0 0 0 0], 'ColumnSpacing',8, 'RowSpacing',4);
             midG.Layout.Row = 2;
+            uilabel(midG,'Text','Preset','FontWeight','bold');
+            app.ResultsPresetDD = uidropdown(midG, 'Items',{'custom','convergence diagnostics','stream trajectories','unit performance'}, ...
+                'Value','custom');
+            app.ResultsApplyPresetBtn = uibutton(midG, 'push', 'Text','Apply preset', ...
+                'ButtonPushedFcn',@(~,~) app.applyResultsPreset());
+            uilabel(midG,'Text','Smoothing','FontWeight','bold');
+            app.ResultsSmoothingDD = uidropdown(midG, 'Items',{'none','moving-average','median'}, 'Value','none', ...
+                'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsSmoothWindowField = uieditfield(midG, 'numeric', 'Value',3, 'Limits',[1 999], ...
+                'RoundFractionalValues','on', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsNormModeDD = uidropdown(midG, 'Items',{'absolute','normalized'}, 'Value','absolute', ...
+                'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsLegendDD = uidropdown(midG, 'Items',{'best','northeast','northwest','southeast','southwest','off'}, ...
+                'Value','best', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+
             uilabel(midG,'Text','X mode','FontWeight','bold');
             app.ResultsXScaleDropDown = uidropdown(midG, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             uilabel(midG,'Text','Y mode','FontWeight','bold');
             app.ResultsYScaleDropDown = uidropdown(midG, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsResetBtn = uibutton(midG, 'push', 'Text','Reset view', ...
+                'ButtonPushedFcn',@(~,~) app.resetResultsView());
+            app.ResultsExportBtn = uibutton(midG, 'push', 'Text','Export figure', ...
+                'ButtonPushedFcn',@(~,~) app.exportResultsFigure());
             app.OpenStreamTableBtn = uibutton(midG, 'push', 'Text','Open Stream Table', ...
                 'FontWeight','bold', 'BackgroundColor',[0.88 0.93 0.99], ...
                 'ButtonPushedFcn',@(~,~) app.openStreamTablePopup());
@@ -561,6 +630,7 @@ classdef MathLabApp < handle
             ylabel(app.ResultsAxes,'Y');
             title(app.ResultsAxes,'Iteration snapshots and solved-state metrics');
 
+            app.resetResultsView();
             app.refreshResultsTargetOptions();
         end
 
@@ -1958,12 +2028,18 @@ classdef MathLabApp < handle
             app.ResultsAxes.YScale = app.ResultsYScaleDropDown.Value;
 
             plotted = false;
-            plotted = app.plotResultsConfig(1) || plotted;
-            plotted = app.plotResultsConfig(2) || plotted;
+            for idx = 1:4
+                plotted = app.plotResultsConfig(idx) || plotted;
+            end
 
             if plotted
-                legend(app.ResultsAxes,'Location','best');
-                app.ResultsPlotStatusLabel.Text = sprintf('Snapshots: %d', numel(app.resultsSnapshots));
+                if strcmp(app.ResultsLegendDD.Value,'off')
+                    legend(app.ResultsAxes,'off');
+                else
+                    legend(app.ResultsAxes,'Location',app.ResultsLegendDD.Value);
+                end
+                app.ResultsPlotStatusLabel.Text = sprintf('Snapshots: %d | smoothing: %s(%d)', ...
+                    numel(app.resultsSnapshots), app.ResultsSmoothingDD.Value, round(app.ResultsSmoothWindowField.Value));
             else
                 app.ResultsPlotStatusLabel.Text = 'No plottable data. Solve first and verify target/variables.';
             end
@@ -1975,6 +2051,9 @@ classdef MathLabApp < handle
             ok = false;
             cfg = app.resultsConfigControls(idx);
             if isempty(cfg.targetDD.Items)
+                return;
+            end
+            if strcmp(cfg.targetDD.Value,'(none)') && ~strcmp(cfg.xVarDD.Value,'iteration') && ~strcmp(cfg.yVarDD.Value,'residual')
                 return;
             end
             x = app.resultsSeriesForConfig(cfg.xVarDD.Value, cfg.targetDD.Value, cfg.compDD.Value);
@@ -1989,13 +2068,17 @@ classdef MathLabApp < handle
             if isempty(x)
                 return;
             end
-            if cfg.normCheck.Value
+
+            y = app.applyResultsSmoothing(y);
+            x = app.applyResultsSmoothing(x);
+
+            if cfg.normCheck.Value || strcmp(app.ResultsNormModeDD.Value, 'normalized')
                 y0 = max(abs(y(1)), eps);
                 y = y ./ y0;
             end
             y = y .* cfg.scaleField.Value;
             yyaxis(app.ResultsAxes, cfg.axisDD.Value);
-            plot(app.ResultsAxes, x, y, '-o', 'LineWidth',1.5, 'MarkerSize',4, ...
+            plot(app.ResultsAxes, x, y, '-', 'LineWidth',1.5, ...
                 'DisplayName', sprintf('Plot %d: %s vs %s @ %s', idx, cfg.yVarDD.Value, cfg.xVarDD.Value, cfg.targetDD.Value));
             if strcmp(cfg.axisDD.Value,'left')
                 ylabel(app.ResultsAxes,'Left axis');
@@ -2004,6 +2087,37 @@ classdef MathLabApp < handle
             end
             xlabel(app.ResultsAxes, 'Configured X variable');
             ok = true;
+        end
+
+        function s = applyResultsSmoothing(app, s)
+            mode = app.ResultsSmoothingDD.Value;
+            w = max(1, round(app.ResultsSmoothWindowField.Value));
+            if w <= 1 || strcmp(mode,'none') || numel(s) < 3
+                return;
+            end
+            if mod(w,2) == 0
+                w = w + 1;
+            end
+            switch mode
+                case 'moving-average'
+                    kern = ones(w,1) / w;
+                    s = conv(s(:), kern, 'same');
+                case 'median'
+                    try
+                        s = medfilt1(s(:), w, 'truncate');
+                    catch
+                        s = s(:);
+                        hw = floor(w/2);
+                        out = s;
+                        for i = 1:numel(s)
+                            lo = max(1, i-hw);
+                            hi = min(numel(s), i+hw);
+                            out(i) = median(s(lo:hi));
+                        end
+                        s = out;
+                    end
+            end
+            s = s(:);
         end
 
         function s = resultsSeriesForConfig(app, varName, targetName, compIdxStr)
@@ -2020,6 +2134,8 @@ classdef MathLabApp < handle
             end
             if strcmp(varName,'iteration')
                 s = app.resultsSnapshotIters(:);
+            elseif strcmp(varName,'residual')
+                s = app.resultsSnapshotResiduals(:);
             end
         end
 
@@ -2045,6 +2161,10 @@ classdef MathLabApp < handle
                         if isfinite(compIdx) && compIdx >= 1 && compIdx <= numel(st.y)
                             val = st.y(compIdx);
                         end
+                    case 'conversion_profile'
+                        if isfinite(compIdx) && compIdx >= 1 && compIdx <= numel(st.y)
+                            val = 1 - st.y(compIdx);
+                        end
                 end
             elseif startsWith(targetName,'Unit: ')
                 key = strtrim(extractAfter(targetName,'Unit: '));
@@ -2056,6 +2176,10 @@ classdef MathLabApp < handle
                     case 'efficiency', if isfield(uu,'eta'), val = uu.eta; end
                     case 'duty', if isfield(uu,'duty'), val = app.fromSI(uu.duty, 'duty'); end
                     case 'power', if isfield(uu,'power'), val = app.fromSI(uu.power, 'power'); end
+                    case 'deltaT_hx'
+                        if isfield(uu,'deltaT_hx'), val = app.fromSI(uu.deltaT_hx, 'temperature'); end
+                    case 'power_specific'
+                        if isfield(uu,'powerSpecific'), val = uu.powerSpecific; end
                 end
             end
         end
@@ -2091,6 +2215,19 @@ classdef MathLabApp < handle
                 if ismethod(u,'getPower')
                     try, us.power = u.getPower(); catch, end
                 end
+                if isa(u, 'proc.units.HeatExchanger')
+                    try
+                        us.deltaT_hx = u.hotInlet.T - u.coldInlet.T;
+                    catch
+                    end
+                end
+                if isa(u, 'proc.units.Compressor')
+                    try
+                        pw = u.getPower();
+                        us.powerSpecific = pw / max(u.inlet.n_dot, eps);
+                    catch
+                    end
+                end
                 snap.units.(fn) = us;
             end
 
@@ -2103,7 +2240,7 @@ classdef MathLabApp < handle
             if isempty(app.ResultsConfig1TargetDD)
                 return;
             end
-            targets = {};
+            targets = {'(none)'};
             if ~isempty(app.lastFlowsheet)
                 for i = 1:numel(app.lastFlowsheet.streamDisplayNames)
                     targets{end+1} = sprintf('Stream: %s', app.lastFlowsheet.streamDisplayNames{i}); %#ok<AGROW>
@@ -2112,10 +2249,7 @@ classdef MathLabApp < handle
                     targets{end+1} = sprintf('Unit: U%d_%s', i, app.shortTypeName(app.lastFlowsheet.units{i})); %#ok<AGROW>
                 end
             end
-            if isempty(targets)
-                targets = {'(none)'};
-            end
-            dds = {app.ResultsConfig1TargetDD, app.ResultsConfig2TargetDD};
+            dds = {app.ResultsConfig1TargetDD, app.ResultsConfig2TargetDD, app.ResultsConfig3TargetDD, app.ResultsConfig4TargetDD};
             for i = 1:numel(dds)
                 dd = dds{i};
                 prev = dd.Value;
@@ -2129,10 +2263,13 @@ classdef MathLabApp < handle
 
             nSpec = max(1, numel(app.speciesNames));
             compItems = arrayfun(@num2str, 1:nSpec, 'Uni', false);
-            app.ResultsConfig1CompDD.Items = compItems;
-            app.ResultsConfig2CompDD.Items = compItems;
-            app.ResultsConfig1CompDD.Value = compItems{1};
-            app.ResultsConfig2CompDD.Value = compItems{1};
+            cdds = {app.ResultsConfig1CompDD, app.ResultsConfig2CompDD, app.ResultsConfig3CompDD, app.ResultsConfig4CompDD};
+            for i = 1:numel(cdds)
+                cdds{i}.Items = compItems;
+                if ~any(strcmp(compItems, cdds{i}.Value))
+                    cdds{i}.Value = compItems{1};
+                end
+            end
         end
 
         function cfg = resultsConfigControls(app, idx)
@@ -2141,11 +2278,122 @@ classdef MathLabApp < handle
                     'targetDD',app.ResultsConfig1TargetDD,'compDD',app.ResultsConfig1CompDD, ...
                     'normCheck',app.ResultsConfig1NormCheck,'scaleField',app.ResultsConfig1ScaleField, ...
                     'axisDD',app.ResultsConfig1AxisDD);
-            else
+            elseif idx == 2
                 cfg = struct('xVarDD',app.ResultsConfig2XVarDD,'yVarDD',app.ResultsConfig2YVarDD, ...
                     'targetDD',app.ResultsConfig2TargetDD,'compDD',app.ResultsConfig2CompDD, ...
                     'normCheck',app.ResultsConfig2NormCheck,'scaleField',app.ResultsConfig2ScaleField, ...
                     'axisDD',app.ResultsConfig2AxisDD);
+            elseif idx == 3
+                cfg = struct('xVarDD',app.ResultsConfig3XVarDD,'yVarDD',app.ResultsConfig3YVarDD, ...
+                    'targetDD',app.ResultsConfig3TargetDD,'compDD',app.ResultsConfig3CompDD, ...
+                    'normCheck',app.ResultsConfig3NormCheck,'scaleField',app.ResultsConfig3ScaleField, ...
+                    'axisDD',app.ResultsConfig3AxisDD);
+            else
+                cfg = struct('xVarDD',app.ResultsConfig4XVarDD,'yVarDD',app.ResultsConfig4YVarDD, ...
+                    'targetDD',app.ResultsConfig4TargetDD,'compDD',app.ResultsConfig4CompDD, ...
+                    'normCheck',app.ResultsConfig4NormCheck,'scaleField',app.ResultsConfig4ScaleField, ...
+                    'axisDD',app.ResultsConfig4AxisDD);
+            end
+        end
+
+        function applyResultsPreset(app)
+            switch app.ResultsPresetDD.Value
+                case 'convergence diagnostics'
+                    app.setResultsTrace(1, 'iteration','residual','left',1,false,'1','(none)');
+                    app.setResultsTrace(2, 'iteration','flow','right',1,true,'1','Stream: Feed');
+                    app.setResultsTrace(3, 'iteration','T','left',1,false,'1','Stream: Feed');
+                    app.setResultsTrace(4, 'iteration','P','right',1,false,'1','Stream: Feed');
+                    app.ResultsSmoothingDD.Value = 'moving-average';
+                    app.ResultsSmoothWindowField.Value = 5;
+                case 'stream trajectories'
+                    app.setResultsTrace(1, 'flow','T','left',1,false,'1','Stream: Feed');
+                    app.setResultsTrace(2, 'flow','P','right',1,false,'1','Stream: Feed');
+                    app.setResultsTrace(3, 'flow','y(i)','left',1,false,'1','Stream: Feed');
+                    app.setResultsTrace(4, 'flow','conversion_profile','right',1,false,'1','Stream: Feed');
+                    app.ResultsSmoothingDD.Value = 'none';
+                    app.ResultsSmoothWindowField.Value = 3;
+                case 'unit performance'
+                    app.setResultsTrace(1, 'iteration','duty','left',1,false,'1','(none)');
+                    app.setResultsTrace(2, 'iteration','power','right',1,false,'1','(none)');
+                    app.setResultsTrace(3, 'iteration','deltaT_hx','left',1,false,'1','(none)');
+                    app.setResultsTrace(4, 'iteration','power_specific','right',1,false,'1','(none)');
+                    app.ResultsSmoothingDD.Value = 'moving-average';
+                    app.ResultsSmoothWindowField.Value = 3;
+            end
+            app.refreshResultsTargetOptions();
+            app.autofillResultTargets();
+            app.refreshResultsTable();
+        end
+
+        function setResultsTrace(app, idx, xVar, yVar, axisName, scaleVal, normVal, compVal, targetVal)
+            cfg = app.resultsConfigControls(idx);
+            cfg.xVarDD.Value = xVar;
+            cfg.yVarDD.Value = yVar;
+            cfg.axisDD.Value = axisName;
+            cfg.scaleField.Value = scaleVal;
+            cfg.normCheck.Value = normVal;
+            if any(strcmp(cfg.compDD.Items, compVal))
+                cfg.compDD.Value = compVal;
+            end
+            if any(strcmp(cfg.targetDD.Items, targetVal))
+                cfg.targetDD.Value = targetVal;
+            else
+                cfg.targetDD.Value = '(none)';
+            end
+        end
+
+        function autofillResultTargets(app)
+            targets = app.ResultsConfig1TargetDD.Items;
+            if isempty(targets)
+                return;
+            end
+            streamTargets = targets(startsWith(targets, 'Stream: '));
+            unitTargets = targets(startsWith(targets, 'Unit: '));
+            for idx = 1:4
+                cfg = app.resultsConfigControls(idx);
+                if startsWith(cfg.yVarDD.Value, 'conversion') || strcmp(cfg.yVarDD.Value,'duty') || strcmp(cfg.yVarDD.Value,'power') || ...
+                        strcmp(cfg.yVarDD.Value,'deltaT_hx') || strcmp(cfg.yVarDD.Value,'power_specific') || strcmp(cfg.yVarDD.Value,'efficiency')
+                    if ~isempty(unitTargets)
+                        cfg.targetDD.Value = unitTargets{1};
+                    end
+                elseif ~strcmp(cfg.yVarDD.Value,'residual') && ~strcmp(cfg.yVarDD.Value,'iteration')
+                    if ~isempty(streamTargets)
+                        cfg.targetDD.Value = streamTargets{1};
+                    end
+                end
+            end
+        end
+
+        function resetResultsView(app)
+            app.ResultsPresetDD.Value = 'custom';
+            app.ResultsNormModeDD.Value = 'absolute';
+            app.ResultsLegendDD.Value = 'best';
+            app.ResultsSmoothingDD.Value = 'none';
+            app.ResultsSmoothWindowField.Value = 3;
+            app.ResultsXScaleDropDown.Value = 'linear';
+            app.ResultsYScaleDropDown.Value = 'linear';
+            app.setResultsTrace(1, 'iteration','flow','left',1,false,'1','(none)');
+            app.setResultsTrace(2, 'iteration','T','right',1,false,'1','(none)');
+            app.setResultsTrace(3, 'iteration','residual','left',1,false,'1','(none)');
+            app.setResultsTrace(4, 'iteration','power','right',1,false,'1','(none)');
+            app.refreshResultsTable();
+        end
+
+        function exportResultsFigure(app)
+            if isempty(app.ResultsAxes) || ~isvalid(app.ResultsAxes)
+                return;
+            end
+            outDir = fullfile(pwd, 'output');
+            if ~exist(outDir, 'dir')
+                mkdir(outDir);
+            end
+            stamp = datestr(now, 'yyyymmdd_HHMMSS');
+            outFile = fullfile(outDir, sprintf('%s_results_plot_%s.png', app.projectTitle, stamp));
+            try
+                exportgraphics(app.ResultsAxes, outFile, 'Resolution', 150);
+                app.setStatus(sprintf('Results plot exported: %s', outFile));
+            catch
+                app.setStatus('Failed to export results figure.');
             end
         end
 
