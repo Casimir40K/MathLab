@@ -1965,18 +1965,34 @@ classdef MathLabApp < handle
             [file, path] = uiputfile('*.mat', 'Save Config', 'mathlab_config.mat');
             if isequal(file, 0), return; end
             filepath = fullfile(path, file);
-            app.syncStreamsFromTable();
-            app.saveConfig(filepath);
-            app.setStatus(sprintf('Config saved to %s', filepath));
+            try
+                app.syncStreamsFromTable();
+                app.saveConfig(filepath);
+                app.setStatus(sprintf('Config save succeeded: %s', filepath));
+            catch ME
+                app.setStatus(sprintf('Config save failed: %s', filepath));
+                uialert(app.Fig, sprintf('Failed to save config to:\n%s\n\n%s', filepath, ME.message), ...
+                    'Save Config Failed', 'Icon', 'error');
+            end
         end
 
         function saveConfigToOutput(app)
-            app.syncStreamsFromTable();
-            outDir = app.ensureOutputDir('saves');
-            fname = app.autoFileName('config', 'mat');
-            filepath = fullfile(outDir, fname);
-            app.saveConfig(filepath);
-            app.setStatus(sprintf('Config saved to %s', filepath));
+            filepath = '';
+            try
+                app.syncStreamsFromTable();
+                outDir = app.ensureOutputDir('saves');
+                fname = app.autoFileName('config', 'mat');
+                filepath = fullfile(outDir, fname);
+                app.saveConfig(filepath);
+                app.setStatus(sprintf('Config save succeeded: %s', filepath));
+            catch ME
+                if isempty(filepath)
+                    filepath = fullfile(pwd, 'output', 'saves');
+                end
+                app.setStatus(sprintf('Config save failed: %s', filepath));
+                uialert(app.Fig, sprintf('Failed to save config to:\n%s\n\n%s', filepath, ME.message), ...
+                    'Save Config Failed', 'Icon', 'error');
+            end
         end
 
         function saveResultsToOutput(app)
@@ -2015,38 +2031,17 @@ classdef MathLabApp < handle
 
         function saveConfig(app, filepath)
             % Serialize entire flowsheet state to a .mat file
-            cfg = struct();
-            cfg.speciesNames = app.speciesNames;
-            cfg.speciesMW    = app.speciesMW;
-
-            % Serialize streams
-            N = numel(app.streams);
-            streamData = struct();
-            for i = 1:N
-                s = app.streams{i};
-                sd.name  = char(string(s.name));
-                sd.n_dot = s.n_dot;
-                sd.T     = s.T;
-                sd.P     = s.P;
-                sd.y     = s.y;
-                sd.known_n_dot = s.known.n_dot;
-                sd.known_T     = s.known.T;
-                sd.known_P     = s.known.P;
-                sd.known_y     = s.known.y;
-                streamData(i) = sd;
+            if ~(ischar(filepath) || isstring(filepath)) || strlength(string(filepath)) == 0
+                error('MathLab:SaveConfig:InvalidPath', 'Config path must be a non-empty string.');
             end
-            cfg.streams = streamData;
+            filepath = char(string(filepath));
+            saveDir = fileparts(filepath);
+            if isempty(saveDir)
+                saveDir = pwd;
+            end
+            app.ensureWritableDir(saveDir);
 
-            % Serialize unit definitions (not the objects themselves)
-            cfg.unitDefs = app.unitDefs;
-
-            % Solver settings
-            cfg.maxIter = app.MaxIterField.Value;
-            cfg.tolAbs  = app.TolField.Value;
-
-            % Project title
-            cfg.projectTitle = app.projectTitle;
-
+            cfg = app.buildValidatedConfigPayload();
             save(filepath, '-struct', 'cfg');
 
             % Also generate a companion .m script
@@ -2805,6 +2800,118 @@ classdef MathLabApp < handle
             cn = class(u); parts = strsplit(cn,'.'); nm = parts{end};
         end
 
+        function cfg = buildValidatedConfigPayload(app)
+            cfg = struct();
+            cfg.speciesNames = app.speciesNames;
+            cfg.speciesMW    = app.speciesMW;
+
+            % Serialize streams
+            N = numel(app.streams);
+            if N == 0
+                streamData = struct('name', {}, 'n_dot', {}, 'T', {}, 'P', {}, 'y', {}, ...
+                    'known_n_dot', {}, 'known_T', {}, 'known_P', {}, 'known_y', {});
+            else
+                streamData = repmat(struct('name', '', 'n_dot', NaN, 'T', NaN, 'P', NaN, 'y', [], ...
+                    'known_n_dot', false, 'known_T', false, 'known_P', false, 'known_y', false), 1, N);
+            end
+            for i = 1:N
+                s = app.streams{i};
+                sd = struct();
+                sd.name  = char(string(s.name));
+                sd.n_dot = s.n_dot;
+                sd.T     = s.T;
+                sd.P     = s.P;
+                sd.y     = s.y;
+                sd.known_n_dot = s.known.n_dot;
+                sd.known_T     = s.known.T;
+                sd.known_P     = s.known.P;
+                sd.known_y     = s.known.y;
+                streamData(i) = sd;
+            end
+            cfg.streams = streamData;
+
+            % Serialize unit definitions (not the objects themselves)
+            cfg.unitDefs = app.unitDefs;
+
+            % Solver settings
+            cfg.maxIter = app.MaxIterField.Value;
+            cfg.tolAbs  = app.TolField.Value;
+
+            % Project title
+            cfg.projectTitle = app.projectTitle;
+
+            app.validateConfigPayload(cfg);
+        end
+
+        function validateConfigPayload(~, cfg)
+            requiredTop = {'speciesNames','speciesMW','streams','unitDefs','maxIter','tolAbs','projectTitle'};
+            for i = 1:numel(requiredTop)
+                key = requiredTop{i};
+                if ~isfield(cfg, key)
+                    error('MathLab:SaveConfig:MissingField', 'Config payload missing required field "%s".', key);
+                end
+            end
+
+            if ~iscell(cfg.speciesNames) || isempty(cfg.speciesNames)
+                error('MathLab:SaveConfig:InvalidSpecies', 'speciesNames must be a non-empty cell array.');
+            end
+            if ~isnumeric(cfg.speciesMW) || numel(cfg.speciesMW) ~= numel(cfg.speciesNames)
+                error('MathLab:SaveConfig:InvalidSpecies', 'speciesMW must be numeric and match speciesNames length.');
+            end
+
+            if ~isstruct(cfg.streams)
+                error('MathLab:SaveConfig:InvalidStreams', 'streams must be a struct array.');
+            end
+            streamRequired = {'name','n_dot','T','P','y','known_n_dot','known_T','known_P','known_y'};
+            for i = 1:numel(cfg.streams)
+                for k = 1:numel(streamRequired)
+                    f = streamRequired{k};
+                    if ~isfield(cfg.streams(i), f)
+                        error('MathLab:SaveConfig:InvalidStreams', ...
+                            'Stream %d missing required field "%s".', i, f);
+                    end
+                end
+            end
+
+            if ~iscell(cfg.unitDefs)
+                error('MathLab:SaveConfig:InvalidUnits', 'unitDefs must be a cell array.');
+            end
+            if any(~cellfun(@isstruct, cfg.unitDefs))
+                error('MathLab:SaveConfig:InvalidUnits', 'unitDefs entries must be structs.');
+            end
+
+            if ~isscalar(cfg.maxIter) || ~isfinite(cfg.maxIter) || cfg.maxIter <= 0
+                error('MathLab:SaveConfig:InvalidSolver', 'maxIter must be a finite positive scalar.');
+            end
+            if ~isscalar(cfg.tolAbs) || ~isfinite(cfg.tolAbs) || cfg.tolAbs <= 0
+                error('MathLab:SaveConfig:InvalidSolver', 'tolAbs must be a finite positive scalar.');
+            end
+        end
+
+        function ensureWritableDir(~, dirPath)
+            if ~(ischar(dirPath) || isstring(dirPath)) || strlength(string(dirPath)) == 0
+                error('MathLab:SaveConfig:InvalidPath', 'Output directory path must be a non-empty string.');
+            end
+            dirPath = char(string(dirPath));
+            if ~exist(dirPath, 'dir')
+                [ok,msg] = mkdir(dirPath);
+                if ~ok
+                    error('MathLab:SaveConfig:CreateDirFailed', ...
+                        'Could not create output directory "%s": %s', dirPath, msg);
+                end
+            end
+            if ~isfolder(dirPath)
+                error('MathLab:SaveConfig:InvalidPath', 'Output directory path is not a folder: %s', dirPath);
+            end
+            [fid,msg] = fopen(fullfile(dirPath, '.mathlab_write_test.tmp'), 'w');
+            if fid < 0
+                error('MathLab:SaveConfig:WritePermission', ...
+                    'Directory is not writable "%s": %s', dirPath, msg);
+            end
+            fclose(fid);
+            delete(fullfile(dirPath, '.mathlab_write_test.tmp'));
+        end
+
         function setStatus(app, msg)
             app.StatusBar.Text = ['  ' msg];
         end
@@ -2817,9 +2924,23 @@ classdef MathLabApp < handle
         function dirPath = ensureOutputDir(~, subfolder)
             % Ensure output/<subfolder> exists and return the path
             baseDir = fullfile(pwd, 'output');
+            if ~exist(baseDir, 'dir')
+                [ok,msg] = mkdir(baseDir);
+                if ~ok
+                    error('MathLab:OutputDir:CreateFailed', ...
+                        'Failed to create output directory "%s": %s', baseDir, msg);
+                end
+            end
             dirPath = fullfile(baseDir, subfolder);
             if ~exist(dirPath, 'dir')
-                mkdir(dirPath);
+                [ok,msg] = mkdir(dirPath);
+                if ~ok
+                    error('MathLab:OutputDir:CreateFailed', ...
+                        'Failed to create output subdirectory "%s": %s', dirPath, msg);
+                end
+            end
+            if ~isfolder(dirPath)
+                error('MathLab:OutputDir:InvalidPath', 'Output path is not a directory: %s', dirPath);
             end
         end
 
