@@ -60,10 +60,24 @@ classdef MathLabApp < handle
 
         % -- Tab 5: Results --
         ResultsTab
-        ResultsTable
-        ResultsShowAliasesCheck
-        ResultsShowAliasColumnCheck
-        ResultsNameModeLabel
+        ResultsAxes
+        ResultsXScaleDropDown
+        ResultsYScaleDropDown
+        ResultsConfig1XVarDD
+        ResultsConfig1YVarDD
+        ResultsConfig1TargetDD
+        ResultsConfig1CompDD
+        ResultsConfig1NormCheck
+        ResultsConfig1ScaleField
+        ResultsConfig1AxisDD
+        ResultsConfig2XVarDD
+        ResultsConfig2YVarDD
+        ResultsConfig2TargetDD
+        ResultsConfig2CompDD
+        ResultsConfig2NormCheck
+        ResultsConfig2ScaleField
+        ResultsConfig2AxisDD
+        ResultsPlotStatusLabel
 
         % -- Tab 6: Sensitivity --
         SensTab
@@ -82,6 +96,11 @@ classdef MathLabApp < handle
 
         % -- Project & Output --
         ProjectTitleField
+        FlowUnitDropDown
+        TempUnitDropDown
+        PressureUnitDropDown
+        DutyUnitDropDown
+        PowerUnitDropDown
         SaveResultsBtn
         OpenUnitTableBtn
 
@@ -103,7 +122,11 @@ classdef MathLabApp < handle
         unitDefs cell = {}    % serializable unit definitions for save/load
         lastSolver = []
         lastFlowsheet = []
+        resultsSnapshots cell = {}
+        resultsSnapshotIters double = []
+        resultsSnapshotResiduals double = []
         projectTitle char = 'MathLab_Project'
+        unitPrefs struct = struct('flow','kmol/s','temperature','K','pressure','Pa','duty','kW','power','kW')
     end
 
     % =====================================================================
@@ -164,8 +187,8 @@ classdef MathLabApp < handle
 
             % --- Left: project config + save/load ---
             leftP = uipanel(gl, 'Title','Project & Config', 'FontWeight','bold');
-            leftG = uigridlayout(leftP, [4 1], ...
-                'RowHeight',{30, 36, 36, 36}, 'Padding',[8 8 8 8], 'RowSpacing',4);
+            leftG = uigridlayout(leftP, [5 1], ...
+                'RowHeight',{30, 72, 36, 36, 24}, 'Padding',[8 8 8 8], 'RowSpacing',4);
 
             % Project title row
             titleRow = uigridlayout(leftG, [1 2], 'ColumnWidth',{110,'1x'}, ...
@@ -174,6 +197,26 @@ classdef MathLabApp < handle
             app.ProjectTitleField = uieditfield(titleRow,'text', ...
                 'Value',app.projectTitle, ...
                 'ValueChangedFcn',@(src,~) app.onProjectTitleChanged(src));
+
+            % Display units row
+            unitRow = uigridlayout(leftG, [2 5], 'ColumnWidth', {'fit','1x','1x','1x','1x'}, ...
+                'Padding',[0 0 0 0], 'ColumnSpacing',6, 'RowSpacing',3);
+            uilabel(unitRow,'Text','Display units:','FontWeight','bold');
+            app.FlowUnitDropDown = uidropdown(unitRow, 'Items', {'mol/s','kmol/s'}, ...
+                'Value', app.unitPrefs.flow, 'ValueChangedFcn', @(src,~) app.onUnitPrefsChanged('flow', src.Value));
+            app.TempUnitDropDown = uidropdown(unitRow, 'Items', {'K','C'}, ...
+                'Value', app.unitPrefs.temperature, 'ValueChangedFcn', @(src,~) app.onUnitPrefsChanged('temperature', src.Value));
+            app.PressureUnitDropDown = uidropdown(unitRow, 'Items', {'Pa','kPa','bar'}, ...
+                'Value', app.unitPrefs.pressure, 'ValueChangedFcn', @(src,~) app.onUnitPrefsChanged('pressure', src.Value));
+            app.DutyUnitDropDown = uidropdown(unitRow, 'Items', {'W','kW','MW'}, ...
+                'Value', app.unitPrefs.duty, 'ValueChangedFcn', @(src,~) app.onUnitPrefsChanged('duty', src.Value));
+
+            uilabel(unitRow,'Text','');
+            app.PowerUnitDropDown = uidropdown(unitRow, 'Items', {'W','kW','MW'}, ...
+                'Value', app.unitPrefs.power, 'ValueChangedFcn', @(src,~) app.onUnitPrefsChanged('power', src.Value));
+            uilabel(unitRow,'Text','');
+            uilabel(unitRow,'Text','');
+            uilabel(unitRow,'Text','');
 
             % Save / Load row
             slRow = uigridlayout(leftG, [1 2], 'ColumnWidth',{'1x','1x'}, ...
@@ -199,7 +242,7 @@ classdef MathLabApp < handle
                 'BackgroundColor',[0.90 0.88 0.98], ...
                 'ButtonPushedFcn',@(~,~) app.openUnitTablePopup());
 
-            % Placeholder for future options
+            % Placeholder for spacing
             uilabel(leftG, 'Text', '');
 
             % --- Right: instructions ---
@@ -463,21 +506,48 @@ classdef MathLabApp < handle
         function buildResultsTab(app)
             t = uitab(app.Tabs, 'Title', ' Results ');
             app.ResultsTab = t;
-            gl = uigridlayout(t, [2 1], 'RowHeight',{34,'1x'}, ...
+            gl = uigridlayout(t, [3 1], 'RowHeight',{130,28,'1x'}, ...
                 'Padding',[12 12 12 12], 'RowSpacing',8);
 
-            topG = uigridlayout(gl, [1 3], 'ColumnWidth',{'fit',120,'1x'}, ...
+            topG = uigridlayout(gl, [2 8], 'ColumnWidth',{'fit','1x','1x',90,80,100,70,'1x'}, ...
                 'Padding',[0 0 0 0], 'ColumnSpacing',8);
             topG.Layout.Row = 1;
-            uilabel(topG, 'Text','Simulation Results', 'FontWeight','bold');
-            app.OpenUnitTableBtn = uibutton(topG,'push','Text','Open Unit Table', ...
-                'FontWeight','bold', 'BackgroundColor',[0.90 0.88 0.98], ...
-                'ButtonPushedFcn',@(~,~) app.openUnitTablePopup());
-            uilabel(topG, 'Text','Inspect solved unit metrics (duty/power/conversion/etc.) in the unit table popup.', ...
-                'FontColor',[0.35 0.35 0.35]);
+            uilabel(topG, 'Text','Plot 1', 'FontWeight','bold');
+            app.ResultsConfig1XVarDD = uidropdown(topG, 'Items',{'iteration','flow','T','P','conversion','efficiency','duty','power','y(i)'}, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1YVarDD = uidropdown(topG, 'Items',{'flow','T','P','conversion','efficiency','duty','power','y(i)'}, 'Value','flow', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1AxisDD = uidropdown(topG, 'Items',{'left','right'}, 'Value','left', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1ScaleField = uieditfield(topG, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1NormCheck = uicheckbox(topG, 'Text','normalize', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
 
-            app.ResultsTable = uitable(gl);
-            app.ResultsTable.Layout.Row = 2;
+            uilabel(topG, 'Text','Plot 2', 'FontWeight','bold');
+            app.ResultsConfig2XVarDD = uidropdown(topG, 'Items',{'iteration','flow','T','P','conversion','efficiency','duty','power','y(i)'}, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2YVarDD = uidropdown(topG, 'Items',{'flow','T','P','conversion','efficiency','duty','power','y(i)'}, 'Value','T', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2AxisDD = uidropdown(topG, 'Items',{'left','right'}, 'Value','right', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2ScaleField = uieditfield(topG, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2NormCheck = uicheckbox(topG, 'Text','normalize', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+
+            midG = uigridlayout(gl, [1 5], 'ColumnWidth',{'fit',120,'fit',120,'1x'}, 'Padding',[0 0 0 0]);
+            midG.Layout.Row = 2;
+            uilabel(midG,'Text','X mode','FontWeight','bold');
+            app.ResultsXScaleDropDown = uidropdown(midG, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            uilabel(midG,'Text','Y mode','FontWeight','bold');
+            app.ResultsYScaleDropDown = uidropdown(midG, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsPlotStatusLabel = uilabel(midG, 'Text','Run solve to populate iteration snapshots.', 'FontColor',[0.35 0.35 0.35]);
+
+            axP = uipanel(gl, 'Title','Results Trends', 'FontWeight','bold');
+            axP.Layout.Row = 3;
+            axG = uigridlayout(axP,[1 1],'Padding',[4 4 4 4]);
+            app.ResultsAxes = uiaxes(axG);
+            grid(app.ResultsAxes,'on');
+            xlabel(app.ResultsAxes,'X');
+            ylabel(app.ResultsAxes,'Y');
+            title(app.ResultsAxes,'Iteration snapshots and solved-state metrics');
+
+            app.refreshResultsTargetOptions();
         end
 
         % ================================================================
@@ -714,14 +784,16 @@ classdef MathLabApp < handle
             N = numel(app.streams);
             yTol = app.getYSumTolerance();
 
-            colNames = [{'Name','n_dot','T (K)','P (Pa)'}, ...
+            colNames = [{'Name', app.unitLabel('flow','n_dot'), app.unitLabel('temperature','T'), app.unitLabel('pressure','P')}, ...
                 cellfun(@(sp) ['y_' sp], app.speciesNames, 'Uni',false), ...
                 {'sum_y','y_ok'}];
             data = cell(N, 6+ns);
             for i = 1:N
                 s = app.streams{i};
                 data{i,1} = char(string(s.name));
-                data{i,2} = s.n_dot; data{i,3} = s.T; data{i,4} = s.P;
+                data{i,2} = app.fromSI(s.n_dot,'flow');
+                data{i,3} = app.fromSI(s.T,'temperature');
+                data{i,4} = app.fromSI(s.P,'pressure');
                 for j = 1:ns
                     if j <= numel(s.y), data{i,4+j} = s.y(j);
                     else,               data{i,4+j} = 0;
@@ -746,7 +818,7 @@ classdef MathLabApp < handle
                 knData{i,5} = all(s.known.y);
             end
             app.StreamKnownTable.Data = knData;
-            app.StreamKnownTable.ColumnName = {'Name','n_dot','T','P','y (all)'};
+            app.StreamKnownTable.ColumnName = {'Name',app.unitLabel('flow','n_dot'),app.unitLabel('temperature','T'),app.unitLabel('pressure','P'),'y (all)'};
             app.StreamKnownTable.ColumnEditable = [false, true, true, true, true];
         end
 
@@ -756,9 +828,9 @@ classdef MathLabApp < handle
             s = app.streams{row};
             ns = numel(app.speciesNames);
             switch col
-                case 2, s.n_dot = evt.NewData;
-                case 3, s.T = evt.NewData;
-                case 4, s.P = evt.NewData;
+                case 2, s.n_dot = app.toSI(evt.NewData,'flow');
+                case 3, s.T = app.toSI(evt.NewData,'temperature');
+                case 4, s.P = app.toSI(evt.NewData,'pressure');
                 otherwise
                     j = col - 4;
                     if j >= 1 && j <= ns, s.y(j) = evt.NewData; end
@@ -786,7 +858,9 @@ classdef MathLabApp < handle
             ns = numel(app.speciesNames);
             for i = 1:min(size(D,1), numel(app.streams))
                 s = app.streams{i};
-                s.n_dot = D{i,2}; s.T = D{i,3}; s.P = D{i,4};
+                s.n_dot = app.toSI(D{i,2},'flow');
+                s.T = app.toSI(D{i,3},'temperature');
+                s.P = app.toSI(D{i,4},'pressure');
                 for j = 1:ns, s.y(j) = D{i,4+j}; end
             end
         end
@@ -1446,28 +1520,66 @@ classdef MathLabApp < handle
 
         function dialogHeater(app, sNames, editIdx)
             if nargin<3, editIdx=[]; end
-            [d, ctrls] = app.makeDialog('Configure Heater', 460, 180, ...
+            [d, ctrls] = app.makeDialog('Configure Heater', 500, 260, ...
                 {{'Inlet:','dropdown',sNames}, ...
                  {'Outlet:','dropdown',sNames}, ...
-                 {'Spec mode:','dropdown',{'Tout','duty'}}, ...
-                 {'Value (Tout [K] or duty [kW]):','numeric',400}});
+                 {'Thermal spec:','dropdown',{'Tout','duty'}}, ...
+                 {sprintf('Thermal value (Tout [%s] or duty [%s]):', app.unitPrefs.temperature, app.unitPrefs.duty),'numeric',app.fromSI(400,'temperature')}, ...
+                 {'Pressure spec:','dropdown',{'pass-through','dP','Pout','PR'}}, ...
+                 {sprintf('Pressure value (dP [%s], Pout [%s], or PR):', app.unitPrefs.pressure, app.unitPrefs.pressure),'numeric',0}});
             if ~isempty(editIdx)
                 u=app.units{editIdx};
                 ctrls{1}.Value=char(string(u.inlet.name));
                 ctrls{2}.Value=char(string(u.outlet.name));
-                if isfinite(u.Tout), ctrls{3}.Value='Tout'; ctrls{4}.Value=u.Tout;
-                else, ctrls{3}.Value='duty'; ctrls{4}.Value=u.duty; end
+                if isfinite(u.Tout), ctrls{3}.Value='Tout'; ctrls{4}.Value=app.fromSI(u.Tout,'temperature');
+                else, ctrls{3}.Value='duty'; ctrls{4}.Value=app.fromSI(u.duty,'duty'); end
+                if isprop(u,'dP') && isfinite(u.dP)
+                    ctrls{5}.Value='dP'; ctrls{6}.Value=app.fromSI(u.dP,'pressure');
+                elseif isprop(u,'Pout') && isfinite(u.Pout)
+                    ctrls{5}.Value='Pout'; ctrls{6}.Value=app.fromSI(u.Pout,'pressure');
+                elseif isprop(u,'PR') && isfinite(u.PR)
+                    ctrls{5}.Value='PR'; ctrls{6}.Value=u.PR;
+                else
+                    ctrls{5}.Value='pass-through'; ctrls{6}.Value=0;
+                end
             elseif numel(sNames)>=2, ctrls{2}.Value=sNames{2}; end
             app.addDialogButtons(d, @okCb);
             function okCb()
                 def.type='Heater'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
-                mode=ctrls{3}.Value; val=ctrls{4}.Value;
-                if strcmp(mode,'Tout'), def.Tout=val; else, def.duty=val; end
+
+                tMode=ctrls{3}.Value; tVal=ctrls{4}.Value;
+                if ~isfinite(tVal)
+                    uialert(d,'Thermal value must be finite.','Error'); return;
+                end
+                if strcmp(tMode,'Tout'), def.Tout=app.toSI(tVal,'temperature'); else, def.duty=app.toSI(tVal,'duty'); end
+
+                pMode=ctrls{5}.Value; pVal=ctrls{6}.Value;
+                if ~strcmp(pMode,'pass-through') && ~isfinite(pVal)
+                    uialert(d,'Pressure value must be finite for selected pressure mode.','Error'); return;
+                end
+                if strcmp(pMode,'dP')
+                    def.dP = app.toSI(pVal,'pressure');
+                elseif strcmp(pMode,'Pout')
+                    if pVal <= 0, uialert(d,sprintf('Pout must be > 0 %s.', app.unitPrefs.pressure),'Error'); return; end
+                    def.Pout = app.toSI(pVal,'pressure');
+                elseif strcmp(pMode,'PR')
+                    if pVal <= 0, uialert(d,'PR must be > 0.','Error'); return; end
+                    def.PR = pVal;
+                end
+
+                pCount = double(isfield(def,'dP')) + double(isfield(def,'Pout')) + double(isfield(def,'PR'));
+                if pCount > 1
+                    uialert(d,'Select only one pressure mode (dP, Pout, or PR).','Error'); return;
+                end
+
                 mix = app.buildThermoMixForGUI();
                 if isempty(mix), uialert(d,'Species not in thermo library.','Error'); return; end
                 args = {};
                 if isfield(def,'Tout'), args=[args,{'Tout',def.Tout}]; end
                 if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                if isfield(def,'dP'), args=[args,{'dP',def.dP}]; end
+                if isfield(def,'Pout'), args=[args,{'Pout',def.Pout}]; end
+                if isfield(def,'PR'), args=[args,{'PR',def.PR}]; end
                 u=proc.units.Heater(app.findStream(def.inlet),app.findStream(def.outlet),mix,args{:});
                 app.commitUnit(u,def,editIdx); delete(d);
             end
@@ -1475,28 +1587,66 @@ classdef MathLabApp < handle
 
         function dialogCooler(app, sNames, editIdx)
             if nargin<3, editIdx=[]; end
-            [d, ctrls] = app.makeDialog('Configure Cooler', 460, 180, ...
+            [d, ctrls] = app.makeDialog('Configure Cooler', 500, 260, ...
                 {{'Inlet:','dropdown',sNames}, ...
                  {'Outlet:','dropdown',sNames}, ...
-                 {'Spec mode:','dropdown',{'Tout','duty'}}, ...
-                 {'Value (Tout [K] or duty [kW]):','numeric',300}});
+                 {'Thermal spec:','dropdown',{'Tout','duty'}}, ...
+                 {sprintf('Thermal value (Tout [%s] or duty [%s]):', app.unitPrefs.temperature, app.unitPrefs.duty),'numeric',app.fromSI(300,'temperature')}, ...
+                 {'Pressure spec:','dropdown',{'pass-through','dP','Pout','PR'}}, ...
+                 {sprintf('Pressure value (dP [%s], Pout [%s], or PR):', app.unitPrefs.pressure, app.unitPrefs.pressure),'numeric',0}});
             if ~isempty(editIdx)
                 u=app.units{editIdx};
                 ctrls{1}.Value=char(string(u.inlet.name));
                 ctrls{2}.Value=char(string(u.outlet.name));
-                if isfinite(u.Tout), ctrls{3}.Value='Tout'; ctrls{4}.Value=u.Tout;
-                else, ctrls{3}.Value='duty'; ctrls{4}.Value=u.duty; end
+                if isfinite(u.Tout), ctrls{3}.Value='Tout'; ctrls{4}.Value=app.fromSI(u.Tout,'temperature');
+                else, ctrls{3}.Value='duty'; ctrls{4}.Value=app.fromSI(u.duty,'duty'); end
+                if isprop(u,'dP') && isfinite(u.dP)
+                    ctrls{5}.Value='dP'; ctrls{6}.Value=app.fromSI(u.dP,'pressure');
+                elseif isprop(u,'Pout') && isfinite(u.Pout)
+                    ctrls{5}.Value='Pout'; ctrls{6}.Value=app.fromSI(u.Pout,'pressure');
+                elseif isprop(u,'PR') && isfinite(u.PR)
+                    ctrls{5}.Value='PR'; ctrls{6}.Value=u.PR;
+                else
+                    ctrls{5}.Value='pass-through'; ctrls{6}.Value=0;
+                end
             elseif numel(sNames)>=2, ctrls{2}.Value=sNames{2}; end
             app.addDialogButtons(d, @okCb);
             function okCb()
                 def.type='Cooler'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
-                mode=ctrls{3}.Value; val=ctrls{4}.Value;
-                if strcmp(mode,'Tout'), def.Tout=val; else, def.duty=val; end
+
+                tMode=ctrls{3}.Value; tVal=ctrls{4}.Value;
+                if ~isfinite(tVal)
+                    uialert(d,'Thermal value must be finite.','Error'); return;
+                end
+                if strcmp(tMode,'Tout'), def.Tout=app.toSI(tVal,'temperature'); else, def.duty=app.toSI(tVal,'duty'); end
+
+                pMode=ctrls{5}.Value; pVal=ctrls{6}.Value;
+                if ~strcmp(pMode,'pass-through') && ~isfinite(pVal)
+                    uialert(d,'Pressure value must be finite for selected pressure mode.','Error'); return;
+                end
+                if strcmp(pMode,'dP')
+                    def.dP = app.toSI(pVal,'pressure');
+                elseif strcmp(pMode,'Pout')
+                    if pVal <= 0, uialert(d,sprintf('Pout must be > 0 %s.', app.unitPrefs.pressure),'Error'); return; end
+                    def.Pout = app.toSI(pVal,'pressure');
+                elseif strcmp(pMode,'PR')
+                    if pVal <= 0, uialert(d,'PR must be > 0.','Error'); return; end
+                    def.PR = pVal;
+                end
+
+                pCount = double(isfield(def,'dP')) + double(isfield(def,'Pout')) + double(isfield(def,'PR'));
+                if pCount > 1
+                    uialert(d,'Select only one pressure mode (dP, Pout, or PR).','Error'); return;
+                end
+
                 mix = app.buildThermoMixForGUI();
                 if isempty(mix), uialert(d,'Species not in thermo library.','Error'); return; end
                 args = {};
                 if isfield(def,'Tout'), args=[args,{'Tout',def.Tout}]; end
                 if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                if isfield(def,'dP'), args=[args,{'dP',def.dP}]; end
+                if isfield(def,'Pout'), args=[args,{'Pout',def.Pout}]; end
+                if isfield(def,'PR'), args=[args,{'PR',def.PR}]; end
                 u=proc.units.Cooler(app.findStream(def.inlet),app.findStream(def.outlet),mix,args{:});
                 app.commitUnit(u,def,editIdx); delete(d);
             end
@@ -1510,16 +1660,16 @@ classdef MathLabApp < handle
                  {'Cold inlet:','dropdown',sNames}, ...
                  {'Cold outlet:','dropdown',sNames}, ...
                  {'Spec mode:','dropdown',{'Th_out','Tc_out','duty'}}, ...
-                 {'Value (T [K] or Q [kW]):','numeric',350}});
+                 {sprintf('Value (T [%s] or Q [%s]):', app.unitPrefs.temperature, app.unitPrefs.duty),'numeric',app.fromSI(350,'temperature')}});
             if ~isempty(editIdx)
                 u=app.units{editIdx};
                 ctrls{1}.Value=char(string(u.hotInlet.name));
                 ctrls{2}.Value=char(string(u.hotOutlet.name));
                 ctrls{3}.Value=char(string(u.coldInlet.name));
                 ctrls{4}.Value=char(string(u.coldOutlet.name));
-                if isfinite(u.Th_out), ctrls{5}.Value='Th_out'; ctrls{6}.Value=u.Th_out;
-                elseif isfinite(u.Tc_out), ctrls{5}.Value='Tc_out'; ctrls{6}.Value=u.Tc_out;
-                else, ctrls{5}.Value='duty'; ctrls{6}.Value=u.duty; end
+                if isfinite(u.Th_out), ctrls{5}.Value='Th_out'; ctrls{6}.Value=app.fromSI(u.Th_out,'temperature');
+                elseif isfinite(u.Tc_out), ctrls{5}.Value='Tc_out'; ctrls{6}.Value=app.fromSI(u.Tc_out,'temperature');
+                else, ctrls{5}.Value='duty'; ctrls{6}.Value=app.fromSI(u.duty,'duty'); end
             elseif numel(sNames)>=4
                 ctrls{2}.Value=sNames{2}; ctrls{3}.Value=sNames{3}; ctrls{4}.Value=sNames{4};
             end
@@ -1529,9 +1679,9 @@ classdef MathLabApp < handle
                 def.hotInlet=ctrls{1}.Value; def.hotOutlet=ctrls{2}.Value;
                 def.coldInlet=ctrls{3}.Value; def.coldOutlet=ctrls{4}.Value;
                 mode=ctrls{5}.Value; val=ctrls{6}.Value;
-                if strcmp(mode,'Th_out'), def.Th_out=val;
-                elseif strcmp(mode,'Tc_out'), def.Tc_out=val;
-                else, def.duty=val; end
+                if strcmp(mode,'Th_out'), def.Th_out=app.toSI(val,'temperature');
+                elseif strcmp(mode,'Tc_out'), def.Tc_out=app.toSI(val,'temperature');
+                else, def.duty=app.toSI(val,'duty'); end
                 mix = app.buildThermoMixForGUI();
                 if isempty(mix), uialert(d,'Species not in thermo library.','Error'); return; end
                 args = {};
@@ -1550,13 +1700,13 @@ classdef MathLabApp < handle
                 {{'Inlet:','dropdown',sNames}, ...
                  {'Outlet:','dropdown',sNames}, ...
                  {'Pressure spec:','dropdown',{'Pout','PR'}}, ...
-                 {'Value (Pout [Pa] or PR):','numeric',2e5}, ...
+                 {sprintf('Value (Pout [%s] or PR):', app.unitPrefs.pressure),'numeric',app.fromSI(2e5,'pressure')}, ...
                  {'Isentropic efficiency (0-1]:','numeric',0.85}});
             if ~isempty(editIdx)
                 u=app.units{editIdx};
                 ctrls{1}.Value=char(string(u.inlet.name));
                 ctrls{2}.Value=char(string(u.outlet.name));
-                if isfinite(u.Pout), ctrls{3}.Value='Pout'; ctrls{4}.Value=u.Pout;
+                if isfinite(u.Pout), ctrls{3}.Value='Pout'; ctrls{4}.Value=app.fromSI(u.Pout,'pressure');
                 else, ctrls{3}.Value='PR'; ctrls{4}.Value=u.PR; end
                 ctrls{5}.Value=u.eta;
             elseif numel(sNames)>=2, ctrls{2}.Value=sNames{2}; end
@@ -1564,7 +1714,7 @@ classdef MathLabApp < handle
             function okCb()
                 def.type='Compressor'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
                 mode=ctrls{3}.Value; val=ctrls{4}.Value;
-                if strcmp(mode,'Pout'), def.Pout=val; else, def.PR=val; end
+                if strcmp(mode,'Pout'), def.Pout=app.toSI(val,'pressure'); else, def.PR=val; end
                 def.eta=ctrls{5}.Value;
                 mix = app.buildThermoMixForGUI();
                 if isempty(mix), uialert(d,'Species not in thermo library.','Error'); return; end
@@ -1582,13 +1732,13 @@ classdef MathLabApp < handle
                 {{'Inlet:','dropdown',sNames}, ...
                  {'Outlet:','dropdown',sNames}, ...
                  {'Pressure spec:','dropdown',{'Pout','PR'}}, ...
-                 {'Value (Pout [Pa] or PR):','numeric',5e4}, ...
+                 {sprintf('Value (Pout [%s] or PR):', app.unitPrefs.pressure),'numeric',app.fromSI(5e4,'pressure')}, ...
                  {'Isentropic efficiency (0-1]:','numeric',0.85}});
             if ~isempty(editIdx)
                 u=app.units{editIdx};
                 ctrls{1}.Value=char(string(u.inlet.name));
                 ctrls{2}.Value=char(string(u.outlet.name));
-                if isfinite(u.Pout), ctrls{3}.Value='Pout'; ctrls{4}.Value=u.Pout;
+                if isfinite(u.Pout), ctrls{3}.Value='Pout'; ctrls{4}.Value=app.fromSI(u.Pout,'pressure');
                 else, ctrls{3}.Value='PR'; ctrls{4}.Value=u.PR; end
                 ctrls{5}.Value=u.eta;
             elseif numel(sNames)>=2, ctrls{2}.Value=sNames{2}; end
@@ -1596,7 +1746,7 @@ classdef MathLabApp < handle
             function okCb()
                 def.type='Turbine'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
                 mode=ctrls{3}.Value; val=ctrls{4}.Value;
-                if strcmp(mode,'Pout'), def.Pout=val; else, def.PR=val; end
+                if strcmp(mode,'Pout'), def.Pout=app.toSI(val,'pressure'); else, def.PR=val; end
                 def.eta=ctrls{5}.Value;
                 mix = app.buildThermoMixForGUI();
                 if isempty(mix), uialert(d,'Species not in thermo library.','Error'); return; end
@@ -1736,9 +1886,15 @@ classdef MathLabApp < handle
             app.LogArea.Value = {'Solving...'};
             drawnow;
 
+            app.resultsSnapshots = {};
+            app.resultsSnapshotIters = [];
+            app.resultsSnapshotResiduals = [];
+            app.captureResultsSnapshot(0, NaN);
+
             % Callback for real-time updates
             function iterCb(iter, rNorm)
                 addpoints(hLine, iter, rNorm);
+                app.captureResultsSnapshot(iter, rNorm);
                 drawnow limitrate;
             end
 
@@ -1752,6 +1908,8 @@ classdef MathLabApp < handle
                     sprintf('Converged in %d iterations', numel(solver.residualHistory)-1));
 
                 app.LogArea.Value = cellstr(solver.logLines);
+
+                app.captureResultsSnapshot(numel(solver.residualHistory)-1, solver.residualHistory(end));
 
                 app.refreshResultsTable();
 
@@ -1770,30 +1928,207 @@ classdef MathLabApp < handle
 
 
         function refreshResultsTable(app)
-            if isempty(app.lastFlowsheet)
-                app.ResultsTable.Data = table();
-                app.ResultsTable.ColumnName = {};
+            if isempty(app.ResultsAxes) || ~isvalid(app.ResultsAxes)
                 return;
             end
 
-            includeAliases = ~isempty(app.ResultsShowAliasesCheck) && app.ResultsShowAliasesCheck.Value;
-            showAliasColumn = true;
-            if ~isempty(app.ResultsShowAliasColumnCheck)
-                showAliasColumn = app.ResultsShowAliasColumnCheck.Value;
+            cla(app.ResultsAxes);
+            yyaxis(app.ResultsAxes,'left');
+            yyaxis(app.ResultsAxes,'right');
+            yyaxis(app.ResultsAxes,'left');
+            hold(app.ResultsAxes,'on');
+            app.ResultsAxes.XScale = app.ResultsXScaleDropDown.Value;
+            app.ResultsAxes.YScale = app.ResultsYScaleDropDown.Value;
+
+            plotted = false;
+            plotted = app.plotResultsConfig(1) || plotted;
+            plotted = app.plotResultsConfig(2) || plotted;
+
+            if plotted
+                legend(app.ResultsAxes,'Location','best');
+                app.ResultsPlotStatusLabel.Text = sprintf('Snapshots: %d', numel(app.resultsSnapshots));
+            else
+                app.ResultsPlotStatusLabel.Text = 'No plottable data. Solve first and verify target/variables.';
+            end
+            hold(app.ResultsAxes,'off');
+            app.refreshResultsTargetOptions();
+        end
+
+        function ok = plotResultsConfig(app, idx)
+            ok = false;
+            cfg = app.resultsConfigControls(idx);
+            if isempty(cfg.targetDD.Items)
+                return;
+            end
+            x = app.resultsSeriesForConfig(cfg.xVarDD.Value, cfg.targetDD.Value, cfg.compDD.Value);
+            y = app.resultsSeriesForConfig(cfg.yVarDD.Value, cfg.targetDD.Value, cfg.compDD.Value);
+            if isempty(x) || isempty(y)
+                return;
+            end
+            n = min(numel(x), numel(y));
+            x = x(1:n); y = y(1:n);
+            mask = isfinite(x) & isfinite(y);
+            x = x(mask); y = y(mask);
+            if isempty(x)
+                return;
+            end
+            if cfg.normCheck.Value
+                y0 = max(abs(y(1)), eps);
+                y = y ./ y0;
+            end
+            y = y .* cfg.scaleField.Value;
+            yyaxis(app.ResultsAxes, cfg.axisDD.Value);
+            plot(app.ResultsAxes, x, y, '-o', 'LineWidth',1.5, 'MarkerSize',4, ...
+                'DisplayName', sprintf('Plot %d: %s vs %s @ %s', idx, cfg.yVarDD.Value, cfg.xVarDD.Value, cfg.targetDD.Value));
+            if strcmp(cfg.axisDD.Value,'left')
+                ylabel(app.ResultsAxes,'Left axis');
+            else
+                ylabel(app.ResultsAxes,'Right axis');
+            end
+            xlabel(app.ResultsAxes, 'Configured X variable');
+            ok = true;
+        end
+
+        function s = resultsSeriesForConfig(app, varName, targetName, compIdxStr)
+            s = [];
+            n = numel(app.resultsSnapshots);
+            if n == 0
+                return;
+            end
+            s = nan(n,1);
+            compIdx = str2double(compIdxStr);
+            for k = 1:n
+                snap = app.resultsSnapshots{k};
+                s(k) = app.extractSnapshotValue(snap, varName, targetName, compIdx);
+            end
+            if strcmp(varName,'iteration')
+                s = app.resultsSnapshotIters(:);
+            end
+        end
+
+        function val = extractSnapshotValue(app, snap, varName, targetName, compIdx)
+            val = NaN;
+            if strcmp(varName,'iteration')
+                if isfield(snap,'iteration'), val = snap.iteration; end
+                return;
+            elseif strcmp(varName,'residual')
+                if isfield(snap,'residual'), val = snap.residual; end
+                return;
             end
 
-            T = app.lastFlowsheet.streamTable( ...
-                'includeAliases', includeAliases, ...
-                'showAliasColumn', showAliasColumn);
-            app.ResultsTable.Data = T;
-            app.ResultsTable.ColumnName = T.Properties.VariableNames;
+            if startsWith(targetName,'Stream: ')
+                key = strtrim(extractAfter(targetName,'Stream: '));
+                if ~isfield(snap.streams, matlab.lang.makeValidName(key)), return; end
+                st = snap.streams.(matlab.lang.makeValidName(key));
+                switch varName
+                    case 'flow', val = app.fromSI(st.n_dot, 'flow');
+                    case 'T', val = app.fromSI(st.T, 'temperature');
+                    case 'P', val = app.fromSI(st.P, 'pressure');
+                    case 'y(i)'
+                        if isfinite(compIdx) && compIdx >= 1 && compIdx <= numel(st.y)
+                            val = st.y(compIdx);
+                        end
+                end
+            elseif startsWith(targetName,'Unit: ')
+                key = strtrim(extractAfter(targetName,'Unit: '));
+                fn = matlab.lang.makeValidName(key);
+                if ~isfield(snap.units, fn), return; end
+                uu = snap.units.(fn);
+                switch varName
+                    case 'conversion', if isfield(uu,'conversion'), val = uu.conversion; end
+                    case 'efficiency', if isfield(uu,'eta'), val = uu.eta; end
+                    case 'duty', if isfield(uu,'duty'), val = app.fromSI(uu.duty, 'duty'); end
+                    case 'power', if isfield(uu,'power'), val = app.fromSI(uu.power, 'power'); end
+                end
+            end
+        end
 
-            if includeAliases
-                app.ResultsNameModeLabel.Text = 'Alias rows are enabled: a single stream handle may appear more than once under different names.';
-            elseif showAliasColumn
-                app.ResultsNameModeLabel.Text = 'Canonical rows shown. Alias names (if any) are listed in the aliases column.';
+        function captureResultsSnapshot(app, iter, rNorm)
+            if isempty(app.lastFlowsheet)
+                return;
+            end
+            snap = struct();
+            snap.iteration = iter;
+            snap.residual = rNorm;
+            snap.streams = struct();
+            snap.units = struct();
+
+            for i = 1:numel(app.lastFlowsheet.streamDisplayRefs)
+                s = app.lastFlowsheet.streamDisplayRefs{i};
+                name = matlab.lang.makeValidName(char(string(app.lastFlowsheet.streamDisplayNames{i})));
+                snap.streams.(name) = struct('n_dot',s.n_dot,'T',s.T,'P',s.P,'y',s.y(:).');
+            end
+
+            for i = 1:numel(app.lastFlowsheet.units)
+                u = app.lastFlowsheet.units{i};
+                uname = sprintf('U%d_%s', i, app.shortTypeName(u));
+                fn = matlab.lang.makeValidName(uname);
+                us = struct();
+                if isprop(u,'conversion'), us.conversion = u.conversion; end
+                if isprop(u,'eta'), us.eta = u.eta; end
+                if ismethod(u,'getDuty')
+                    try, us.duty = u.getDuty(); catch, end
+                elseif isprop(u,'duty')
+                    us.duty = u.duty;
+                end
+                if ismethod(u,'getPower')
+                    try, us.power = u.getPower(); catch, end
+                end
+                snap.units.(fn) = us;
+            end
+
+            app.resultsSnapshots{end+1} = snap;
+            app.resultsSnapshotIters(end+1,1) = iter;
+            app.resultsSnapshotResiduals(end+1,1) = rNorm;
+        end
+
+        function refreshResultsTargetOptions(app)
+            if isempty(app.ResultsConfig1TargetDD)
+                return;
+            end
+            targets = {};
+            if ~isempty(app.lastFlowsheet)
+                for i = 1:numel(app.lastFlowsheet.streamDisplayNames)
+                    targets{end+1} = sprintf('Stream: %s', app.lastFlowsheet.streamDisplayNames{i}); %#ok<AGROW>
+                end
+                for i = 1:numel(app.lastFlowsheet.units)
+                    targets{end+1} = sprintf('Unit: U%d_%s', i, app.shortTypeName(app.lastFlowsheet.units{i})); %#ok<AGROW>
+                end
+            end
+            if isempty(targets)
+                targets = {'(none)'};
+            end
+            dds = {app.ResultsConfig1TargetDD, app.ResultsConfig2TargetDD};
+            for i = 1:numel(dds)
+                dd = dds{i};
+                prev = dd.Value;
+                dd.Items = targets;
+                if any(strcmp(targets, prev))
+                    dd.Value = prev;
+                else
+                    dd.Value = targets{1};
+                end
+            end
+
+            nSpec = max(1, numel(app.speciesNames));
+            compItems = arrayfun(@num2str, 1:nSpec, 'Uni', false);
+            app.ResultsConfig1CompDD.Items = compItems;
+            app.ResultsConfig2CompDD.Items = compItems;
+            app.ResultsConfig1CompDD.Value = compItems{1};
+            app.ResultsConfig2CompDD.Value = compItems{1};
+        end
+
+        function cfg = resultsConfigControls(app, idx)
+            if idx == 1
+                cfg = struct('xVarDD',app.ResultsConfig1XVarDD,'yVarDD',app.ResultsConfig1YVarDD, ...
+                    'targetDD',app.ResultsConfig1TargetDD,'compDD',app.ResultsConfig1CompDD, ...
+                    'normCheck',app.ResultsConfig1NormCheck,'scaleField',app.ResultsConfig1ScaleField, ...
+                    'axisDD',app.ResultsConfig1AxisDD);
             else
-                app.ResultsNameModeLabel.Text = 'Canonical rows shown. Enable alias rows or the aliases column to view alternate names.';
+                cfg = struct('xVarDD',app.ResultsConfig2XVarDD,'yVarDD',app.ResultsConfig2YVarDD, ...
+                    'targetDD',app.ResultsConfig2TargetDD,'compDD',app.ResultsConfig2CompDD, ...
+                    'normCheck',app.ResultsConfig2NormCheck,'scaleField',app.ResultsConfig2ScaleField, ...
+                    'axisDD',app.ResultsConfig2AxisDD);
             end
         end
 
@@ -1926,21 +2261,21 @@ classdef MathLabApp < handle
             pairs = {};
             cn = class(u);
             if contains(cn,'HeatExchanger')
-                pairs = {'Duty [kW]', app.safeMethodValue(u,'getDuty'); ...
-                         'Hot Tout [K]', app.safePropValue(u,'hotOutlet','T'); ...
-                         'Cold Tout [K]', app.safePropValue(u,'coldOutlet','T')};
+                pairs = {app.unitLabel('duty','Duty'), app.safeMethodValue(u,'getDuty','duty'); ...
+                         app.unitLabel('temperature','Hot Tout'), app.safePropValue(u,'hotOutlet','T','temperature'); ...
+                         app.unitLabel('temperature','Cold Tout'), app.safePropValue(u,'coldOutlet','T','temperature')};
             elseif contains(cn,'Heater') || contains(cn,'Cooler')
-                pairs = {'Duty [kW]', app.safeMethodValue(u,'getDuty'); ...
-                         'Tin [K]', app.safePropValue(u,'inlet','T'); ...
-                         'Tout [K]', app.safePropValue(u,'outlet','T')};
+                pairs = {app.unitLabel('duty','Duty'), app.safeMethodValue(u,'getDuty','duty'); ...
+                         app.unitLabel('temperature','Tin'), app.safePropValue(u,'inlet','T','temperature'); ...
+                         app.unitLabel('temperature','Tout'), app.safePropValue(u,'outlet','T','temperature')};
             elseif contains(cn,'Compressor') || contains(cn,'Turbine')
-                pairs = {'Power [kW]', app.safeMethodValue(u,'getPower'); ...
+                pairs = {app.unitLabel('power','Power'), app.safeMethodValue(u,'getPower','power'); ...
                          'Pressure ratio', app.safePressureRatio(u); ...
                          'Eta', app.safeSimpleProp(u,'eta')};
             elseif contains(cn,'ConversionReactor') || contains(cn,'YieldReactor') || contains(cn,'Reactor')
                 pairs = {'Conversion', app.safeSimpleProp(u,'conversion'); ...
-                         'Tin [K]', app.safePropValue(u,'inlet','T'); ...
-                         'Tout [K]', app.safePropValue(u,'outlet','T')};
+                         app.unitLabel('temperature','Tin'), app.safePropValue(u,'inlet','T','temperature'); ...
+                         app.unitLabel('temperature','Tout'), app.safePropValue(u,'outlet','T','temperature')};
             elseif contains(cn,'StoichiometricReactor')
                 pairs = {'Extent', app.safeSimpleProp(u,'extent'); ...
                          'Extent mode', app.safeSimpleProp(u,'extentMode'); ...
@@ -1954,10 +2289,14 @@ classdef MathLabApp < handle
             end
         end
 
-        function val = safeMethodValue(app, u, m)
+        function val = safeMethodValue(app, u, m, quantity)
             try
                 if ismethod(u,m)
-                    val = app.formatSpecValue(u.(m)());
+                    raw = u.(m)();
+                    if nargin >= 4 && ~isempty(quantity)
+                        raw = app.fromSI(raw, quantity);
+                    end
+                    val = app.formatSpecValue(raw);
                 else
                     val = '-';
                 end
@@ -1978,12 +2317,16 @@ classdef MathLabApp < handle
             end
         end
 
-        function val = safePropValue(app, u, ownerProp, fieldProp)
+        function val = safePropValue(app, u, ownerProp, fieldProp, quantity)
             try
                 if isprop(u, ownerProp)
                     owner = u.(ownerProp);
                     if isprop(owner, fieldProp)
-                        val = app.formatSpecValue(owner.(fieldProp));
+                        raw = owner.(fieldProp);
+                        if nargin >= 5 && ~isempty(quantity)
+                            raw = app.fromSI(raw, quantity);
+                        end
+                        val = app.formatSpecValue(raw);
                         return;
                     end
                 end
@@ -2085,9 +2428,21 @@ classdef MathLabApp < handle
                 case 'Mixer'
                     specs = {'No. inlets', app.formatSpecValue(numel(def.inlets)); 'Outlet', app.formatSpecValue(def.outlet)};
                 case 'Heater'
-                    specs = {'Tout [K]', app.getDefField(def,'Tout'); 'Qdot [W]', app.getDefField(def,'duty')};
+                    specs = {app.unitLabel('temperature','Tout'), app.getDefField(def,'Tout','temperature'); app.unitLabel('duty','Qdot'), app.getDefField(def,'duty','duty'); 'dP/Pout/PR', app.getDefField(def,'dP','pressure')};
+                    if ischar(specs{3,2}) && strcmp(specs{3,2},'-')
+                        specs{3,2} = app.getDefField(def,'Pout','pressure');
+                        if ischar(specs{3,2}) && strcmp(specs{3,2},'-')
+                            specs{3,2} = app.getDefField(def,'PR');
+                        end
+                    end
                 case 'Cooler'
-                    specs = {'Tout [K]', app.getDefField(def,'Tout'); 'Qdot [W]', app.getDefField(def,'duty')};
+                    specs = {app.unitLabel('temperature','Tout'), app.getDefField(def,'Tout','temperature'); app.unitLabel('duty','Qdot'), app.getDefField(def,'duty','duty'); 'dP/Pout/PR', app.getDefField(def,'dP','pressure')};
+                    if ischar(specs{3,2}) && strcmp(specs{3,2},'-')
+                        specs{3,2} = app.getDefField(def,'Pout','pressure');
+                        if ischar(specs{3,2}) && strcmp(specs{3,2},'-')
+                            specs{3,2} = app.getDefField(def,'PR');
+                        end
+                    end
                 case 'Compressor'
                     specs = {'Pressure ratio', app.getDefField(def,'PR'); 'Efficiency', app.getDefField(def,'eta')};
                 case 'Turbine'
@@ -2117,7 +2472,7 @@ classdef MathLabApp < handle
                 case 'Manifold'
                     specs = {'Route', app.getDefField(def,'route')};
                 case 'Source'
-                    specs = {'Total flow', app.getDefField(def,'totalFlow'); 'Composition', app.getDefField(def,'composition'); 'Comp flows', app.getDefField(def,'componentFlows')};
+                    specs = {app.unitLabel('flow','Total flow'), app.getDefField(def,'totalFlow','flow'); 'Composition', app.getDefField(def,'composition'); app.unitLabel('flow','Comp flows'), app.getDefField(def,'componentFlows','flow')};
                 case 'DesignSpec'
                     specs = {'Metric', app.getDefField(def,'metric'); 'Target', app.getDefField(def,'target'); 'Species idx', app.getDefField(def,'speciesIndex')};
                 case 'Adjust'
@@ -2131,9 +2486,16 @@ classdef MathLabApp < handle
             end
         end
 
-        function val = getDefField(app, def, fld)
+        function val = getDefField(app, def, fld, quantity)
+            if nargin < 4
+                quantity = '';
+            end
             if isfield(def, fld)
-                val = app.formatSpecValue(def.(fld));
+                raw = def.(fld);
+                if ~isempty(quantity)
+                    raw = app.fromSI(raw, quantity);
+                end
+                val = app.formatSpecValue(raw);
             else
                 val = '-';
             end
@@ -2159,6 +2521,133 @@ classdef MathLabApp < handle
             else
                 txt = char(string(val));
             end
+        end
+
+        function valOut = toSI(app, valIn, quantity)
+            valOut = valIn;
+            if isempty(valIn) || ~isnumeric(valIn)
+                return;
+            end
+            switch quantity
+                case 'flow'
+                    if strcmp(app.unitPrefs.flow,'mol/s')
+                        valOut = valIn / 1000;
+                    end
+                case 'temperature'
+                    if strcmp(app.unitPrefs.temperature,'C')
+                        valOut = valIn + 273.15;
+                    end
+                case 'pressure'
+                    switch app.unitPrefs.pressure
+                        case 'kPa', valOut = valIn * 1e3;
+                        case 'bar', valOut = valIn * 1e5;
+                    end
+                case {'duty','power'}
+                    unitName = app.unitPrefs.(quantity);
+                    switch unitName
+                        case 'kW', valOut = valIn * 1e3;
+                        case 'MW', valOut = valIn * 1e6;
+                    end
+            end
+        end
+
+        function valOut = fromSI(app, valIn, quantity)
+            valOut = valIn;
+            if isempty(valIn) || ~isnumeric(valIn)
+                return;
+            end
+            switch quantity
+                case 'flow'
+                    if strcmp(app.unitPrefs.flow,'mol/s')
+                        valOut = valIn * 1000;
+                    end
+                case 'temperature'
+                    if strcmp(app.unitPrefs.temperature,'C')
+                        valOut = valIn - 273.15;
+                    end
+                case 'pressure'
+                    switch app.unitPrefs.pressure
+                        case 'kPa', valOut = valIn / 1e3;
+                        case 'bar', valOut = valIn / 1e5;
+                    end
+                case {'duty','power'}
+                    unitName = app.unitPrefs.(quantity);
+                    switch unitName
+                        case 'kW', valOut = valIn / 1e3;
+                        case 'MW', valOut = valIn / 1e6;
+                    end
+            end
+        end
+
+        function txt = unitLabel(app, quantity, base)
+            switch quantity
+                case 'flow', u = app.unitPrefs.flow;
+                case 'temperature', u = app.unitPrefs.temperature;
+                case 'pressure', u = app.unitPrefs.pressure;
+                case 'duty', u = app.unitPrefs.duty;
+                case 'power', u = app.unitPrefs.power;
+                otherwise, u = '';
+            end
+            if isempty(u)
+                txt = base;
+            else
+                txt = sprintf('%s (%s)', base, u);
+            end
+        end
+
+        function T = convertDisplayStreamTable(app, T)
+            if isempty(T)
+                return;
+            end
+            vars = T.Properties.VariableNames;
+            for i = 1:numel(vars)
+                v = vars{i};
+                if strcmp(v,'n_dot')
+                    T.(v) = app.fromSI(T.(v), 'flow');
+                elseif strcmp(v,'T')
+                    T.(v) = app.fromSI(T.(v), 'temperature');
+                elseif strcmp(v,'P')
+                    T.(v) = app.fromSI(T.(v), 'pressure');
+                end
+            end
+        end
+
+        function names = displayColumnNames(app, names)
+            for i = 1:numel(names)
+                if strcmp(names{i},'n_dot')
+                    names{i} = app.unitLabel('flow','n_dot');
+                elseif strcmp(names{i},'T')
+                    names{i} = app.unitLabel('temperature','T');
+                elseif strcmp(names{i},'P')
+                    names{i} = app.unitLabel('pressure','P');
+                end
+            end
+        end
+
+        function onUnitPrefsChanged(app, key, value)
+            app.unitPrefs.(key) = char(string(value));
+            app.refreshStreamTables();
+            app.refreshResultsTable();
+            app.refreshUnitTablePopup();
+        end
+
+        function prefs = mergeUnitPrefs(~, inPrefs)
+            prefs = struct('flow','kmol/s','temperature','K','pressure','Pa','duty','kW','power','kW');
+            fns = fieldnames(prefs);
+            for i = 1:numel(fns)
+                f = fns{i};
+                if isfield(inPrefs,f) && ~(isempty(inPrefs.(f)))
+                    prefs.(f) = char(string(inPrefs.(f)));
+                end
+            end
+        end
+
+        function applyUnitPrefsToControls(app)
+            if ~isempty(app.FlowUnitDropDown), app.FlowUnitDropDown.Value = app.unitPrefs.flow; end
+            if ~isempty(app.TempUnitDropDown), app.TempUnitDropDown.Value = app.unitPrefs.temperature; end
+            if ~isempty(app.PressureUnitDropDown), app.PressureUnitDropDown.Value = app.unitPrefs.pressure; end
+            if ~isempty(app.DutyUnitDropDown), app.DutyUnitDropDown.Value = app.unitPrefs.duty; end
+            if ~isempty(app.PowerUnitDropDown), app.PowerUnitDropDown.Value = app.unitPrefs.power; end
         end
 
         function fmt = normalizeUnitTableExportFormat(~, fmt)
@@ -2643,6 +3132,11 @@ classdef MathLabApp < handle
                 app.ProjectTitleField.Value = cfg.projectTitle;
             end
 
+            if isfield(cfg,'unitPrefs') && isstruct(cfg.unitPrefs)
+                app.unitPrefs = app.mergeUnitPrefs(cfg.unitPrefs);
+            end
+            app.applyUnitPrefsToControls();
+
             app.refreshStreamTables();
             app.refreshUnitsListBox();
             app.refreshFlowsheetDiagram();
@@ -2825,6 +3319,9 @@ classdef MathLabApp < handle
                         args = {};
                         if isfield(def,'Tout'), args=[args,{'Tout',def.Tout}]; end
                         if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                        if isfield(def,'dP'), args=[args,{'dP',def.dP}]; end
+                        if isfield(def,'Pout'), args=[args,{'Pout',def.Pout}]; end
+                        if isfield(def,'PR'), args=[args,{'PR',def.PR}]; end
                         u = proc.units.Heater(sIn, sOut, mix, args{:});
                     end
                 case 'Cooler'
@@ -2835,6 +3332,9 @@ classdef MathLabApp < handle
                         args = {};
                         if isfield(def,'Tout'), args=[args,{'Tout',def.Tout}]; end
                         if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                        if isfield(def,'dP'), args=[args,{'dP',def.dP}]; end
+                        if isfield(def,'Pout'), args=[args,{'Pout',def.Pout}]; end
+                        if isfield(def,'PR'), args=[args,{'PR',def.PR}]; end
                         u = proc.units.Cooler(sIn, sOut, mix, args{:});
                     end
                 case 'HeatExchanger'
@@ -2990,15 +3490,21 @@ classdef MathLabApp < handle
                             fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
                             fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
                             args = '';
-                            if isfield(def,'Tout'), args = sprintf(', ''Tout'', %.6g', def.Tout); end
-                            if isfield(def,'duty'), args = sprintf(', ''duty'', %.6g', def.duty); end
+                            if isfield(def,'Tout'), args = [args, sprintf(', ''Tout'', %.6g', def.Tout)]; end
+                            if isfield(def,'duty'), args = [args, sprintf(', ''duty'', %.6g', def.duty)]; end
+                            if isfield(def,'dP'), args = [args, sprintf(', ''dP'', %.6g', def.dP)]; end
+                            if isfield(def,'Pout'), args = [args, sprintf(', ''Pout'', %.6g', def.Pout)]; end
+                            if isfield(def,'PR'), args = [args, sprintf(', ''PR'', %.6g', def.PR)]; end
                             fprintf(fid, 'fs.addUnit(proc.units.Heater(%s, %s, mix%s));\n', def.inlet, def.outlet, args);
                         case 'Cooler'
                             fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
                             fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
                             args = '';
-                            if isfield(def,'Tout'), args = sprintf(', ''Tout'', %.6g', def.Tout); end
-                            if isfield(def,'duty'), args = sprintf(', ''duty'', %.6g', def.duty); end
+                            if isfield(def,'Tout'), args = [args, sprintf(', ''Tout'', %.6g', def.Tout)]; end
+                            if isfield(def,'duty'), args = [args, sprintf(', ''duty'', %.6g', def.duty)]; end
+                            if isfield(def,'dP'), args = [args, sprintf(', ''dP'', %.6g', def.dP)]; end
+                            if isfield(def,'Pout'), args = [args, sprintf(', ''Pout'', %.6g', def.Pout)]; end
+                            if isfield(def,'PR'), args = [args, sprintf(', ''PR'', %.6g', def.PR)]; end
                             fprintf(fid, 'fs.addUnit(proc.units.Cooler(%s, %s, mix%s));\n', def.inlet, def.outlet, args);
                         case 'HeatExchanger'
                             fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
@@ -3386,12 +3892,13 @@ classdef MathLabApp < handle
 
             % Project title
             cfg.projectTitle = app.projectTitle;
+            cfg.unitPrefs = app.unitPrefs;
 
             app.validateConfigPayload(cfg);
         end
 
         function validateConfigPayload(~, cfg)
-            requiredTop = {'speciesNames','speciesMW','streams','unitDefs','maxIter','tolAbs','projectTitle'};
+            requiredTop = {'speciesNames','speciesMW','streams','unitDefs','maxIter','tolAbs','projectTitle','unitPrefs'};
             for i = 1:numel(requiredTop)
                 key = requiredTop{i};
                 if ~isfield(cfg, key)
@@ -3432,6 +3939,10 @@ classdef MathLabApp < handle
             end
             if ~isscalar(cfg.tolAbs) || ~isfinite(cfg.tolAbs) || cfg.tolAbs <= 0
                 error('MathLab:SaveConfig:InvalidSolver', 'tolAbs must be a finite positive scalar.');
+            end
+
+            if ~isstruct(cfg.unitPrefs)
+                error('MathLab:SaveConfig:InvalidUnits', 'unitPrefs must be a struct.');
             end
         end
 
