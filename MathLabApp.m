@@ -80,6 +80,12 @@ classdef MathLabApp < handle
         % -- Project & Output --
         ProjectTitleField
         SaveResultsBtn
+        OpenUnitTableBtn
+
+        % -- Unit Table popup --
+        UnitTableFig
+        UnitTable
+        UnitTableStatusLabel
     end
 
     % =====================================================================
@@ -450,8 +456,21 @@ classdef MathLabApp < handle
         function buildResultsTab(app)
             t = uitab(app.Tabs, 'Title', ' Results ');
             app.ResultsTab = t;
-            gl = uigridlayout(t, [1 1], 'Padding',[12 12 12 12]);
+            gl = uigridlayout(t, [2 1], 'RowHeight',{34,'1x'}, ...
+                'Padding',[12 12 12 12], 'RowSpacing',8);
+
+            topG = uigridlayout(gl, [1 3], 'ColumnWidth',{'fit',120,'1x'}, ...
+                'Padding',[0 0 0 0], 'ColumnSpacing',8);
+            topG.Layout.Row = 1;
+            uilabel(topG, 'Text','Simulation Results', 'FontWeight','bold');
+            app.OpenUnitTableBtn = uibutton(topG,'push','Text','Open Unit Table', ...
+                'FontWeight','bold', 'BackgroundColor',[0.90 0.88 0.98], ...
+                'ButtonPushedFcn',@(~,~) app.openUnitTablePopup());
+            uilabel(topG, 'Text','Inspect solved unit metrics (duty/power/conversion/etc.) in the unit table popup.', ...
+                'FontColor',[0.35 0.35 0.35]);
+
             app.ResultsTable = uitable(gl);
+            app.ResultsTable.Layout.Row = 2;
         end
 
         % ================================================================
@@ -593,6 +612,7 @@ classdef MathLabApp < handle
             app.refreshUnitsListBox();
             app.refreshFlowsheetDiagram();
             app.updateDOF();
+            app.refreshUnitTablePopup();
             app.updateSensDropdowns();
             app.refreshSpeciesPropsTable();
             app.StreamNameField.Value = 'S2';
@@ -912,6 +932,7 @@ classdef MathLabApp < handle
             app.refreshUnitsListBox();
             app.refreshFlowsheetDiagram();
             app.updateDOF();
+            app.refreshUnitTablePopup();
         end
 
         function idx = getSelectedUnitIdx(app)
@@ -936,6 +957,7 @@ classdef MathLabApp < handle
             app.refreshUnitsListBox();
             app.refreshFlowsheetDiagram();
             app.updateDOF();
+            app.refreshUnitTablePopup();
         end
     end
 
@@ -1682,6 +1704,389 @@ classdef MathLabApp < handle
         end
     end
 
+
+    % =====================================================================
+    %  UNIT TABLE POPUP
+    % =====================================================================
+    methods (Access = private)
+        function openUnitTablePopup(app)
+            if ~isempty(app.UnitTableFig) && isvalid(app.UnitTableFig)
+                app.refreshUnitTablePopup();
+                app.UnitTableFig.Visible = 'on';
+                return;
+            end
+
+            app.UnitTableFig = uifigure('Name','MathLab — Unit Results Table', ...
+                'Position',[120 80 980 480], 'Color',[0.97 0.97 0.98]);
+            app.UnitTableFig.CloseRequestFcn = @(src,~) app.onUnitTablePopupClosed(src);
+
+            gl = uigridlayout(app.UnitTableFig, [3 1], ...
+                'RowHeight',{34,'1x',32}, 'Padding',[10 10 10 10], 'RowSpacing',6);
+
+            topG = uigridlayout(gl, [1 4], 'ColumnWidth',{'fit','1x',110,110}, ...
+                'Padding',[0 0 0 0], 'ColumnSpacing',6);
+            topG.Layout.Row = 1;
+            uilabel(topG, 'Text','Unit Results Table (Read-only)', 'FontWeight','bold', 'FontSize',13);
+            uilabel(topG, 'Text','Type + connected streams + solved metrics (duty/power/conversion) are flattened for quick review.', ...
+                'FontColor',[0.35 0.35 0.35]);
+            uibutton(topG, 'push', 'Text','Export CSV', ...
+                'ButtonPushedFcn',@(~,~) app.exportUnitTableToOutput('csv'));
+            uibutton(topG, 'push', 'Text','Export MAT', ...
+                'ButtonPushedFcn',@(~,~) app.exportUnitTableToOutput('mat'));
+
+            app.UnitTable = uitable(gl, ...
+                'ColumnEditable', false(1,9), ...
+                'ColumnName', {'Unit #','Type','Connected Streams', ...
+                               'Spec 1 Label','Spec 1 Value', ...
+                               'Spec 2 Label','Spec 2 Value', ...
+                               'Spec 3 Label','Spec 3 Value'});
+            app.UnitTable.Layout.Row = 2;
+
+            app.UnitTableStatusLabel = uilabel(gl, 'Text','', 'FontColor',[0.3 0.3 0.3]);
+            app.UnitTableStatusLabel.Layout.Row = 3;
+
+            app.refreshUnitTablePopup();
+        end
+
+        function onUnitTablePopupClosed(app, src)
+            if ~isempty(src) && isvalid(src)
+                delete(src);
+            end
+            app.UnitTableFig = [];
+            app.UnitTable = [];
+            app.UnitTableStatusLabel = [];
+        end
+
+        function refreshUnitTablePopup(app)
+            if isempty(app.UnitTable) || ~isvalid(app.UnitTable)
+                return;
+            end
+            T = app.buildUnitResultsTable();
+            app.UnitTable.Data = T;
+            app.UnitTable.ColumnName = T.Properties.VariableNames;
+            if isempty(T)
+                status = 'No units defined yet.';
+            elseif isempty(app.lastSolver) || isempty(app.lastFlowsheet)
+                status = sprintf('%d unit(s). Showing configured values. Run Solve for calculated metrics.', height(T));
+            else
+                status = sprintf('%d unit(s). Read-only simulation view with solved metrics.', height(T));
+            end
+            if ~isempty(app.UnitTableStatusLabel) && isvalid(app.UnitTableStatusLabel)
+                app.UnitTableStatusLabel.Text = status;
+            end
+        end
+
+        function T = buildUnitResultsTable(app)
+            if ~isempty(app.lastFlowsheet) && isprop(app.lastFlowsheet, 'units')
+                T = app.buildUnitTableFromObjects(app.lastFlowsheet.units);
+            elseif ~isempty(app.units)
+                T = app.buildUnitTableFromObjects(app.units);
+            else
+                T = app.buildUnitTable();
+            end
+        end
+
+        function T = buildUnitTableFromObjects(app, units)
+            n = numel(units);
+            cols = {'Unit_Index','Type','Connected_Streams', ...
+                    'Result1_Label','Result1_Value','Result2_Label','Result2_Value','Result3_Label','Result3_Value'};
+            if n == 0
+                T = cell2table(cell(0, numel(cols)), 'VariableNames', cols);
+                return;
+            end
+            data = cell(n, numel(cols));
+            for i = 1:n
+                data(i,:) = app.serializeUnitObjectRow(i, units{i});
+            end
+            T = cell2table(data, 'VariableNames', cols);
+        end
+
+        function row = serializeUnitObjectRow(app, idx, u)
+            row = {idx, app.shortTypeName(u), '-', '-', '-', '-', '-', '-', '-'};
+            row{3} = app.unitObjectConnectedStreams(u);
+            pairs = app.unitObjectResultPairs(u);
+            for k = 1:min(3,size(pairs,1))
+                row{3 + (k-1)*2 + 1} = pairs{k,1};
+                row{3 + (k-1)*2 + 2} = pairs{k,2};
+            end
+        end
+
+        function streamText = unitObjectConnectedStreams(app, u)
+            names = {};
+            if ismethod(u, 'streamNames')
+                try
+                    names = u.streamNames();
+                catch
+                    names = {};
+                end
+            end
+            if isempty(names)
+                streamText = '-';
+            else
+                streamText = app.formatSpecValue(names);
+            end
+        end
+
+        function pairs = unitObjectResultPairs(app, u)
+            pairs = {};
+            cn = class(u);
+            if contains(cn,'HeatExchanger')
+                pairs = {'Duty [kW]', app.safeMethodValue(u,'getDuty'); ...
+                         'Hot Tout [K]', app.safePropValue(u,'hotOutlet','T'); ...
+                         'Cold Tout [K]', app.safePropValue(u,'coldOutlet','T')};
+            elseif contains(cn,'Heater') || contains(cn,'Cooler')
+                pairs = {'Duty [kW]', app.safeMethodValue(u,'getDuty'); ...
+                         'Tin [K]', app.safePropValue(u,'inlet','T'); ...
+                         'Tout [K]', app.safePropValue(u,'outlet','T')};
+            elseif contains(cn,'Compressor') || contains(cn,'Turbine')
+                pairs = {'Power [kW]', app.safeMethodValue(u,'getPower'); ...
+                         'Pressure ratio', app.safePressureRatio(u); ...
+                         'Eta', app.safeSimpleProp(u,'eta')};
+            elseif contains(cn,'ConversionReactor') || contains(cn,'YieldReactor') || contains(cn,'Reactor')
+                pairs = {'Conversion', app.safeSimpleProp(u,'conversion'); ...
+                         'Tin [K]', app.safePropValue(u,'inlet','T'); ...
+                         'Tout [K]', app.safePropValue(u,'outlet','T')};
+            elseif contains(cn,'StoichiometricReactor')
+                pairs = {'Extent', app.safeSimpleProp(u,'extent'); ...
+                         'Extent mode', app.safeSimpleProp(u,'extentMode'); ...
+                         'Ref species', app.safeSimpleProp(u,'referenceSpecies')};
+            elseif contains(cn,'Separator')
+                pairs = {'Split phi', app.safeSimpleProp(u,'phi')};
+            elseif contains(cn,'Purge')
+                pairs = {'Purge beta', app.safeSimpleProp(u,'beta')};
+            else
+                pairs = {'Description', app.safeDescribe(u)};
+            end
+        end
+
+        function val = safeMethodValue(app, u, m)
+            try
+                if ismethod(u,m)
+                    val = app.formatSpecValue(u.(m)());
+                else
+                    val = '-';
+                end
+            catch
+                val = '-';
+            end
+        end
+
+        function val = safeSimpleProp(app, u, p)
+            try
+                if isprop(u,p)
+                    val = app.formatSpecValue(u.(p));
+                else
+                    val = '-';
+                end
+            catch
+                val = '-';
+            end
+        end
+
+        function val = safePropValue(app, u, ownerProp, fieldProp)
+            try
+                if isprop(u, ownerProp)
+                    owner = u.(ownerProp);
+                    if isprop(owner, fieldProp)
+                        val = app.formatSpecValue(owner.(fieldProp));
+                        return;
+                    end
+                end
+            catch
+            end
+            val = '-';
+        end
+
+        function val = safePressureRatio(app, u)
+            try
+                if isprop(u,'PR') && isfinite(u.PR)
+                    val = app.formatSpecValue(u.PR);
+                    return;
+                end
+                if isprop(u,'inlet') && isprop(u,'outlet')
+                    p1 = u.inlet.P;
+                    p2 = u.outlet.P;
+                    if isfinite(p1) && p1 ~= 0 && isfinite(p2)
+                        val = app.formatSpecValue(p2/p1);
+                        return;
+                    end
+                end
+            catch
+            end
+            val = '-';
+        end
+
+        function txt = safeDescribe(~, u)
+            try
+                if ismethod(u,'describe')
+                    txt = char(string(u.describe()));
+                else
+                    txt = class(u);
+                end
+            catch
+                txt = class(u);
+            end
+        end
+
+        function T = buildUnitTable(app)
+            n = numel(app.unitDefs);
+            cols = {'Unit_Index','Type','Connected_Streams', ...
+                    'Spec1_Label','Spec1_Value','Spec2_Label','Spec2_Value','Spec3_Label','Spec3_Value'};
+            if n == 0
+                T = cell2table(cell(0, numel(cols)), 'VariableNames', cols);
+                return;
+            end
+            data = cell(n, numel(cols));
+            for i = 1:n
+                data(i,:) = app.serializeUnitDefRow(i, app.unitDefs{i});
+            end
+            T = cell2table(data, 'VariableNames', cols);
+        end
+
+        function row = serializeUnitDefRow(app, idx, def)
+            row = {idx, '-', '-', '-', '-', '-', '-', '-', '-'};
+            if ~isstruct(def) || ~isfield(def,'type')
+                return;
+            end
+            typ = char(string(def.type));
+            row{2} = typ;
+            row{3} = app.unitConnectedStreams(def);
+
+            specs = app.unitSpecPairs(def);
+            for k = 1:min(3,size(specs,1))
+                row{3 + (k-1)*2 + 1} = specs{k,1};
+                row{3 + (k-1)*2 + 2} = specs{k,2};
+            end
+        end
+
+        function streamText = unitConnectedStreams(app, def)
+            parts = {};
+            fSingle = {'inlet','outlet','source','tear','stream','recycle','purge','outletA','outletB', ...
+                'processInlet','bypassStream','processReturn','hotInlet','hotOutlet','coldInlet','coldOutlet', ...
+                'lhsStream','aStream','bStream'};
+            for i = 1:numel(fSingle)
+                f = fSingle{i};
+                if isfield(def,f)
+                    parts{end+1} = sprintf('%s=%s', f, app.formatSpecValue(def.(f))); %#ok<AGROW>
+                end
+            end
+            if isfield(def,'inlets')
+                parts{end+1} = sprintf('inlets=%s', app.formatSpecValue(def.inlets)); %#ok<AGROW>
+            end
+            if isfield(def,'outlets')
+                parts{end+1} = sprintf('outlets=%s', app.formatSpecValue(def.outlets)); %#ok<AGROW>
+            end
+            if isempty(parts)
+                streamText = '-';
+            else
+                streamText = strjoin(parts, ' | ');
+            end
+        end
+
+        function specs = unitSpecPairs(app, def)
+            specs = {};
+            typ = char(string(def.type));
+            switch typ
+                case 'Mixer'
+                    specs = {'No. inlets', app.formatSpecValue(numel(def.inlets)); 'Outlet', app.formatSpecValue(def.outlet)};
+                case 'Heater'
+                    specs = {'Tout [K]', app.getDefField(def,'Tout'); 'Qdot [W]', app.getDefField(def,'duty')};
+                case 'Cooler'
+                    specs = {'Tout [K]', app.getDefField(def,'Tout'); 'Qdot [W]', app.getDefField(def,'duty')};
+                case 'Compressor'
+                    specs = {'Pressure ratio', app.getDefField(def,'PR'); 'Efficiency', app.getDefField(def,'eta')};
+                case 'Turbine'
+                    specs = {'Pressure ratio', app.getDefField(def,'PR'); 'Efficiency', app.getDefField(def,'eta')};
+                case 'Reactor'
+                    specs = {'Conversion', app.getDefField(def,'conversion'); 'Reactions', app.getDefField(def,'reactions')};
+                case 'ConversionReactor'
+                    specs = {'Key species', app.getDefField(def,'keySpecies'); 'Conversion', app.getDefField(def,'conversion'); 'Mode', app.getDefField(def,'conversionMode')};
+                case 'StoichiometricReactor'
+                    specs = {'Extent', app.getDefField(def,'extent'); 'Mode', app.getDefField(def,'extentMode'); 'Ref species', app.getDefField(def,'referenceSpecies')};
+                case 'YieldReactor'
+                    specs = {'Basis species', app.getDefField(def,'basisSpecies'); 'Conversion', app.getDefField(def,'conversion'); 'Products', app.getDefField(def,'productSpecies')};
+                case 'EquilibriumReactor'
+                    specs = {'Keq', app.getDefField(def,'Keq'); 'Ref species', app.getDefField(def,'referenceSpecies'); 'Stoich nu', app.getDefField(def,'nu')};
+                case 'Separator'
+                    specs = {'Split phi', app.getDefField(def,'phi')};
+                case 'Purge'
+                    specs = {'Purge beta', app.getDefField(def,'beta')};
+                case 'Splitter'
+                    if isfield(def,'splitFractions')
+                        specs = {'Mode', 'fractions'; 'Values', app.getDefField(def,'splitFractions')};
+                    else
+                        specs = {'Mode', 'flows'; 'Values', app.getDefField(def,'specifiedOutletFlows')};
+                    end
+                case 'Bypass'
+                    specs = {'Bypass fraction', app.getDefField(def,'bypassFraction')};
+                case 'Manifold'
+                    specs = {'Route', app.getDefField(def,'route')};
+                case 'Source'
+                    specs = {'Total flow', app.getDefField(def,'totalFlow'); 'Composition', app.getDefField(def,'composition'); 'Comp flows', app.getDefField(def,'componentFlows')};
+                case 'DesignSpec'
+                    specs = {'Metric', app.getDefField(def,'metric'); 'Target', app.getDefField(def,'target'); 'Species idx', app.getDefField(def,'speciesIndex')};
+                case 'Adjust'
+                    specs = {'Field', app.getDefField(def,'field'); 'Index', app.getDefField(def,'index'); 'Bounds', sprintf('[%s, %s]', app.getDefField(def,'minValue'), app.getDefField(def,'maxValue'))};
+                case 'Calculator'
+                    specs = {'LHS field', app.getDefField(def,'lhsField'); 'Operator', app.getDefField(def,'operator'); 'RHS fields', sprintf('%s %s %s', app.getDefField(def,'aField'), app.getDefField(def,'operator'), app.getDefField(def,'bField'))};
+                case 'Constraint'
+                    specs = {'Field', app.getDefField(def,'field'); 'Value', app.getDefField(def,'value'); 'Index', app.getDefField(def,'index')};
+                otherwise
+                    specs = {'Spec struct fields', app.formatSpecValue(fieldnames(def)')};
+            end
+        end
+
+        function val = getDefField(app, def, fld)
+            if isfield(def, fld)
+                val = app.formatSpecValue(def.(fld));
+            else
+                val = '-';
+            end
+        end
+
+        function txt = formatSpecValue(~, val)
+            if ischar(val)
+                txt = val;
+            elseif isstring(val)
+                txt = char(val);
+            elseif isnumeric(val) || islogical(val)
+                if isscalar(val)
+                    txt = num2str(val);
+                else
+                    txt = mat2str(val);
+                end
+            elseif iscell(val)
+                c = cell(size(val));
+                for i = 1:numel(val)
+                    c{i} = char(string(val{i}));
+                end
+                txt = ['{' strjoin(c, ', ') '}'];
+            else
+                txt = char(string(val));
+            end
+        end
+
+        function exportUnitTableToOutput(app, fmt)
+            T = app.buildUnitResultsTable();
+            outDir = app.ensureOutputDir('results');
+            switch lower(fmt)
+                case 'csv'
+                    filepath = fullfile(outDir, app.autoFileName('unit_table', 'csv'));
+                    writetable(T, filepath);
+                case 'mat'
+                    filepath = fullfile(outDir, app.autoFileName('unit_table', 'mat'));
+                    unitTable = T; %#ok<NASGU>
+                    save(filepath, 'unitTable');
+                otherwise
+                    error('MathLab:UnitTable:UnsupportedFormat', 'Unsupported export format "%s"', fmt);
+            end
+            app.setStatus(sprintf('Unit table exported to %s', filepath));
+            if ~isempty(app.UnitTableStatusLabel) && isvalid(app.UnitTableStatusLabel)
+                app.UnitTableStatusLabel.Text = sprintf('Exported %s (%d rows): %s', upper(fmt), height(T), filepath);
+            end
+        end
+    end
+
     % =====================================================================
     %  SAVE / LOAD CONFIG
     % =====================================================================
@@ -2101,6 +2506,7 @@ classdef MathLabApp < handle
             app.refreshUnitsListBox();
             app.refreshFlowsheetDiagram();
             app.updateDOF();
+            app.refreshUnitTablePopup();
             app.updateSensDropdowns();
             app.refreshSpeciesPropsTable();
 
