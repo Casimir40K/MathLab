@@ -1446,28 +1446,66 @@ classdef MathLabApp < handle
 
         function dialogHeater(app, sNames, editIdx)
             if nargin<3, editIdx=[]; end
-            [d, ctrls] = app.makeDialog('Configure Heater', 460, 180, ...
+            [d, ctrls] = app.makeDialog('Configure Heater', 500, 260, ...
                 {{'Inlet:','dropdown',sNames}, ...
                  {'Outlet:','dropdown',sNames}, ...
-                 {'Spec mode:','dropdown',{'Tout','duty'}}, ...
-                 {'Value (Tout [K] or duty [kW]):','numeric',400}});
+                 {'Thermal spec:','dropdown',{'Tout','duty'}}, ...
+                 {'Thermal value (Tout [K] or duty [kW]):','numeric',400}, ...
+                 {'Pressure spec:','dropdown',{'pass-through','dP','Pout','PR'}}, ...
+                 {'Pressure value (dP [Pa], Pout [Pa], or PR):','numeric',0}});
             if ~isempty(editIdx)
                 u=app.units{editIdx};
                 ctrls{1}.Value=char(string(u.inlet.name));
                 ctrls{2}.Value=char(string(u.outlet.name));
                 if isfinite(u.Tout), ctrls{3}.Value='Tout'; ctrls{4}.Value=u.Tout;
                 else, ctrls{3}.Value='duty'; ctrls{4}.Value=u.duty; end
+                if isprop(u,'dP') && isfinite(u.dP)
+                    ctrls{5}.Value='dP'; ctrls{6}.Value=u.dP;
+                elseif isprop(u,'Pout') && isfinite(u.Pout)
+                    ctrls{5}.Value='Pout'; ctrls{6}.Value=u.Pout;
+                elseif isprop(u,'PR') && isfinite(u.PR)
+                    ctrls{5}.Value='PR'; ctrls{6}.Value=u.PR;
+                else
+                    ctrls{5}.Value='pass-through'; ctrls{6}.Value=0;
+                end
             elseif numel(sNames)>=2, ctrls{2}.Value=sNames{2}; end
             app.addDialogButtons(d, @okCb);
             function okCb()
                 def.type='Heater'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
-                mode=ctrls{3}.Value; val=ctrls{4}.Value;
-                if strcmp(mode,'Tout'), def.Tout=val; else, def.duty=val; end
+
+                tMode=ctrls{3}.Value; tVal=ctrls{4}.Value;
+                if ~isfinite(tVal)
+                    uialert(d,'Thermal value must be finite.','Error'); return;
+                end
+                if strcmp(tMode,'Tout'), def.Tout=tVal; else, def.duty=tVal; end
+
+                pMode=ctrls{5}.Value; pVal=ctrls{6}.Value;
+                if ~strcmp(pMode,'pass-through') && ~isfinite(pVal)
+                    uialert(d,'Pressure value must be finite for selected pressure mode.','Error'); return;
+                end
+                if strcmp(pMode,'dP')
+                    def.dP = pVal;
+                elseif strcmp(pMode,'Pout')
+                    if pVal <= 0, uialert(d,'Pout must be > 0 Pa.','Error'); return; end
+                    def.Pout = pVal;
+                elseif strcmp(pMode,'PR')
+                    if pVal <= 0, uialert(d,'PR must be > 0.','Error'); return; end
+                    def.PR = pVal;
+                end
+
+                pCount = double(isfield(def,'dP')) + double(isfield(def,'Pout')) + double(isfield(def,'PR'));
+                if pCount > 1
+                    uialert(d,'Select only one pressure mode (dP, Pout, or PR).','Error'); return;
+                end
+
                 mix = app.buildThermoMixForGUI();
                 if isempty(mix), uialert(d,'Species not in thermo library.','Error'); return; end
                 args = {};
                 if isfield(def,'Tout'), args=[args,{'Tout',def.Tout}]; end
                 if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                if isfield(def,'dP'), args=[args,{'dP',def.dP}]; end
+                if isfield(def,'Pout'), args=[args,{'Pout',def.Pout}]; end
+                if isfield(def,'PR'), args=[args,{'PR',def.PR}]; end
                 u=proc.units.Heater(app.findStream(def.inlet),app.findStream(def.outlet),mix,args{:});
                 app.commitUnit(u,def,editIdx); delete(d);
             end
@@ -1475,28 +1513,66 @@ classdef MathLabApp < handle
 
         function dialogCooler(app, sNames, editIdx)
             if nargin<3, editIdx=[]; end
-            [d, ctrls] = app.makeDialog('Configure Cooler', 460, 180, ...
+            [d, ctrls] = app.makeDialog('Configure Cooler', 500, 260, ...
                 {{'Inlet:','dropdown',sNames}, ...
                  {'Outlet:','dropdown',sNames}, ...
-                 {'Spec mode:','dropdown',{'Tout','duty'}}, ...
-                 {'Value (Tout [K] or duty [kW]):','numeric',300}});
+                 {'Thermal spec:','dropdown',{'Tout','duty'}}, ...
+                 {'Thermal value (Tout [K] or duty [kW]):','numeric',300}, ...
+                 {'Pressure spec:','dropdown',{'pass-through','dP','Pout','PR'}}, ...
+                 {'Pressure value (dP [Pa], Pout [Pa], or PR):','numeric',0}});
             if ~isempty(editIdx)
                 u=app.units{editIdx};
                 ctrls{1}.Value=char(string(u.inlet.name));
                 ctrls{2}.Value=char(string(u.outlet.name));
                 if isfinite(u.Tout), ctrls{3}.Value='Tout'; ctrls{4}.Value=u.Tout;
                 else, ctrls{3}.Value='duty'; ctrls{4}.Value=u.duty; end
+                if isprop(u,'dP') && isfinite(u.dP)
+                    ctrls{5}.Value='dP'; ctrls{6}.Value=u.dP;
+                elseif isprop(u,'Pout') && isfinite(u.Pout)
+                    ctrls{5}.Value='Pout'; ctrls{6}.Value=u.Pout;
+                elseif isprop(u,'PR') && isfinite(u.PR)
+                    ctrls{5}.Value='PR'; ctrls{6}.Value=u.PR;
+                else
+                    ctrls{5}.Value='pass-through'; ctrls{6}.Value=0;
+                end
             elseif numel(sNames)>=2, ctrls{2}.Value=sNames{2}; end
             app.addDialogButtons(d, @okCb);
             function okCb()
                 def.type='Cooler'; def.inlet=ctrls{1}.Value; def.outlet=ctrls{2}.Value;
-                mode=ctrls{3}.Value; val=ctrls{4}.Value;
-                if strcmp(mode,'Tout'), def.Tout=val; else, def.duty=val; end
+
+                tMode=ctrls{3}.Value; tVal=ctrls{4}.Value;
+                if ~isfinite(tVal)
+                    uialert(d,'Thermal value must be finite.','Error'); return;
+                end
+                if strcmp(tMode,'Tout'), def.Tout=tVal; else, def.duty=tVal; end
+
+                pMode=ctrls{5}.Value; pVal=ctrls{6}.Value;
+                if ~strcmp(pMode,'pass-through') && ~isfinite(pVal)
+                    uialert(d,'Pressure value must be finite for selected pressure mode.','Error'); return;
+                end
+                if strcmp(pMode,'dP')
+                    def.dP = pVal;
+                elseif strcmp(pMode,'Pout')
+                    if pVal <= 0, uialert(d,'Pout must be > 0 Pa.','Error'); return; end
+                    def.Pout = pVal;
+                elseif strcmp(pMode,'PR')
+                    if pVal <= 0, uialert(d,'PR must be > 0.','Error'); return; end
+                    def.PR = pVal;
+                end
+
+                pCount = double(isfield(def,'dP')) + double(isfield(def,'Pout')) + double(isfield(def,'PR'));
+                if pCount > 1
+                    uialert(d,'Select only one pressure mode (dP, Pout, or PR).','Error'); return;
+                end
+
                 mix = app.buildThermoMixForGUI();
                 if isempty(mix), uialert(d,'Species not in thermo library.','Error'); return; end
                 args = {};
                 if isfield(def,'Tout'), args=[args,{'Tout',def.Tout}]; end
                 if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                if isfield(def,'dP'), args=[args,{'dP',def.dP}]; end
+                if isfield(def,'Pout'), args=[args,{'Pout',def.Pout}]; end
+                if isfield(def,'PR'), args=[args,{'PR',def.PR}]; end
                 u=proc.units.Cooler(app.findStream(def.inlet),app.findStream(def.outlet),mix,args{:});
                 app.commitUnit(u,def,editIdx); delete(d);
             end
@@ -2085,9 +2161,21 @@ classdef MathLabApp < handle
                 case 'Mixer'
                     specs = {'No. inlets', app.formatSpecValue(numel(def.inlets)); 'Outlet', app.formatSpecValue(def.outlet)};
                 case 'Heater'
-                    specs = {'Tout [K]', app.getDefField(def,'Tout'); 'Qdot [W]', app.getDefField(def,'duty')};
+                    specs = {'Tout [K]', app.getDefField(def,'Tout'); 'Qdot [W]', app.getDefField(def,'duty'); 'dP/Pout/PR', app.getDefField(def,'dP')};
+                    if ischar(specs{3,2}) && strcmp(specs{3,2},'-')
+                        specs{3,2} = app.getDefField(def,'Pout');
+                        if ischar(specs{3,2}) && strcmp(specs{3,2},'-')
+                            specs{3,2} = app.getDefField(def,'PR');
+                        end
+                    end
                 case 'Cooler'
-                    specs = {'Tout [K]', app.getDefField(def,'Tout'); 'Qdot [W]', app.getDefField(def,'duty')};
+                    specs = {'Tout [K]', app.getDefField(def,'Tout'); 'Qdot [W]', app.getDefField(def,'duty'); 'dP/Pout/PR', app.getDefField(def,'dP')};
+                    if ischar(specs{3,2}) && strcmp(specs{3,2},'-')
+                        specs{3,2} = app.getDefField(def,'Pout');
+                        if ischar(specs{3,2}) && strcmp(specs{3,2},'-')
+                            specs{3,2} = app.getDefField(def,'PR');
+                        end
+                    end
                 case 'Compressor'
                     specs = {'Pressure ratio', app.getDefField(def,'PR'); 'Efficiency', app.getDefField(def,'eta')};
                 case 'Turbine'
@@ -2825,6 +2913,9 @@ classdef MathLabApp < handle
                         args = {};
                         if isfield(def,'Tout'), args=[args,{'Tout',def.Tout}]; end
                         if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                        if isfield(def,'dP'), args=[args,{'dP',def.dP}]; end
+                        if isfield(def,'Pout'), args=[args,{'Pout',def.Pout}]; end
+                        if isfield(def,'PR'), args=[args,{'PR',def.PR}]; end
                         u = proc.units.Heater(sIn, sOut, mix, args{:});
                     end
                 case 'Cooler'
@@ -2835,6 +2926,9 @@ classdef MathLabApp < handle
                         args = {};
                         if isfield(def,'Tout'), args=[args,{'Tout',def.Tout}]; end
                         if isfield(def,'duty'), args=[args,{'duty',def.duty}]; end
+                        if isfield(def,'dP'), args=[args,{'dP',def.dP}]; end
+                        if isfield(def,'Pout'), args=[args,{'Pout',def.Pout}]; end
+                        if isfield(def,'PR'), args=[args,{'PR',def.PR}]; end
                         u = proc.units.Cooler(sIn, sOut, mix, args{:});
                     end
                 case 'HeatExchanger'
@@ -2990,15 +3084,21 @@ classdef MathLabApp < handle
                             fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
                             fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
                             args = '';
-                            if isfield(def,'Tout'), args = sprintf(', ''Tout'', %.6g', def.Tout); end
-                            if isfield(def,'duty'), args = sprintf(', ''duty'', %.6g', def.duty); end
+                            if isfield(def,'Tout'), args = [args, sprintf(', ''Tout'', %.6g', def.Tout)]; end
+                            if isfield(def,'duty'), args = [args, sprintf(', ''duty'', %.6g', def.duty)]; end
+                            if isfield(def,'dP'), args = [args, sprintf(', ''dP'', %.6g', def.dP)]; end
+                            if isfield(def,'Pout'), args = [args, sprintf(', ''Pout'', %.6g', def.Pout)]; end
+                            if isfield(def,'PR'), args = [args, sprintf(', ''PR'', %.6g', def.PR)]; end
                             fprintf(fid, 'fs.addUnit(proc.units.Heater(%s, %s, mix%s));\n', def.inlet, def.outlet, args);
                         case 'Cooler'
                             fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
                             fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
                             args = '';
-                            if isfield(def,'Tout'), args = sprintf(', ''Tout'', %.6g', def.Tout); end
-                            if isfield(def,'duty'), args = sprintf(', ''duty'', %.6g', def.duty); end
+                            if isfield(def,'Tout'), args = [args, sprintf(', ''Tout'', %.6g', def.Tout)]; end
+                            if isfield(def,'duty'), args = [args, sprintf(', ''duty'', %.6g', def.duty)]; end
+                            if isfield(def,'dP'), args = [args, sprintf(', ''dP'', %.6g', def.dP)]; end
+                            if isfield(def,'Pout'), args = [args, sprintf(', ''Pout'', %.6g', def.Pout)]; end
+                            if isfield(def,'PR'), args = [args, sprintf(', ''PR'', %.6g', def.PR)]; end
                             fprintf(fid, 'fs.addUnit(proc.units.Cooler(%s, %s, mix%s));\n', def.inlet, def.outlet, args);
                         case 'HeatExchanger'
                             fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
