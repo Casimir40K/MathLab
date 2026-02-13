@@ -712,10 +712,12 @@ classdef MathLabApp < handle
         function refreshStreamTables(app)
             ns = numel(app.speciesNames);
             N = numel(app.streams);
+            yTol = app.getYSumTolerance();
 
             colNames = [{'Name','n_dot','T (K)','P (Pa)'}, ...
-                cellfun(@(sp) ['y_' sp], app.speciesNames, 'Uni',false)];
-            data = cell(N, 4+ns);
+                cellfun(@(sp) ['y_' sp], app.speciesNames, 'Uni',false), ...
+                {'sum_y','y_ok'}];
+            data = cell(N, 6+ns);
             for i = 1:N
                 s = app.streams{i};
                 data{i,1} = char(string(s.name));
@@ -725,10 +727,14 @@ classdef MathLabApp < handle
                     else,               data{i,4+j} = 0;
                     end
                 end
+                [sumY, yStatus] = app.evaluateYSumStatus(s, yTol);
+                data{i,5+ns} = sumY;
+                data{i,6+ns} = yStatus;
             end
             app.StreamValTable.Data = data;
             app.StreamValTable.ColumnName = colNames;
-            app.StreamValTable.ColumnEditable = [false, true(1, 3+ns)];
+            app.StreamValTable.ColumnEditable = [false, true(1, 3+ns), false, false];
+            app.applyStreamYStyles();
 
             knData = cell(N, 5);
             for i = 1:N
@@ -757,6 +763,7 @@ classdef MathLabApp < handle
                     j = col - 4;
                     if j >= 1 && j <= ns, s.y(j) = evt.NewData; end
             end
+            app.refreshStreamTables();
         end
 
         function onKnownEdit(app, ~, evt)
@@ -781,6 +788,59 @@ classdef MathLabApp < handle
                 s = app.streams{i};
                 s.n_dot = D{i,2}; s.T = D{i,3}; s.P = D{i,4};
                 for j = 1:ns, s.y(j) = D{i,4+j}; end
+            end
+        end
+
+        function tol = getYSumTolerance(app)
+            tol = 1e-9;
+            if ~isempty(app.TolField) && isnumeric(app.TolField.Value) && isfinite(app.TolField.Value)
+                tol = app.TolField.Value;
+            end
+            tol = max(tol, eps);
+        end
+
+        function [sumY, yStatus] = evaluateYSumStatus(~, s, tol)
+            yVals = double(s.y(:));
+            yVals = yVals(isfinite(yVals));
+            sumY = sum(yVals);
+            err = abs(sumY - 1.0);
+            if err <= tol
+                yStatus = 'OK';
+            elseif err <= 10*tol
+                yStatus = 'WARN';
+            else
+                yStatus = 'ERROR';
+            end
+        end
+
+        function applyStreamYStyles(app)
+            if isempty(app.StreamValTable) || isempty(app.StreamValTable.Data)
+                return;
+            end
+
+            removeStyle(app.StreamValTable);
+
+            ns = numel(app.speciesNames);
+            sumCol = 5 + ns;
+            statusCol = 6 + ns;
+            yTol = app.getYSumTolerance();
+
+            goodStyle = uistyle('BackgroundColor',[0.86 0.96 0.86], 'FontColor',[0.00 0.40 0.00]);
+            warnStyle = uistyle('BackgroundColor',[1.00 0.95 0.80], 'FontColor',[0.55 0.35 0.00]);
+            badStyle  = uistyle('BackgroundColor',[1.00 0.85 0.85], 'FontColor',[0.60 0.00 0.00]);
+
+            for i = 1:numel(app.streams)
+                [~, yStatus] = app.evaluateYSumStatus(app.streams{i}, yTol);
+                switch yStatus
+                    case 'OK'
+                        sty = goodStyle;
+                    case 'WARN'
+                        sty = warnStyle;
+                    otherwise
+                        sty = badStyle;
+                end
+                addStyle(app.StreamValTable, sty, 'cell', [i, sumCol]);
+                addStyle(app.StreamValTable, sty, 'cell', [i, statusCol]);
             end
         end
     end
