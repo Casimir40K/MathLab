@@ -78,6 +78,7 @@ classdef MathLabApp < handle
         ResultsConfig2ScaleField
         ResultsConfig2AxisDD
         ResultsPlotStatusLabel
+        OpenStreamTableBtn
 
         % -- Tab 6: Sensitivity --
         SensTab
@@ -108,6 +109,14 @@ classdef MathLabApp < handle
         UnitTableFig
         UnitTable
         UnitTableStatusLabel
+
+        % -- Stream Table popup --
+        StreamTableFig
+        StreamTable
+        StreamTableStatusLabel
+        StreamExportFormatDD
+        StreamExportFileField
+        StreamExportPathField
     end
 
     % =====================================================================
@@ -127,6 +136,7 @@ classdef MathLabApp < handle
         resultsSnapshotResiduals double = []
         projectTitle char = 'MathLab_Project'
         unitPrefs struct = struct('flow','kmol/s','temperature','K','pressure','Pa','duty','kW','power','kW')
+        lastExportPath char = ''
     end
 
     % =====================================================================
@@ -530,13 +540,17 @@ classdef MathLabApp < handle
             app.ResultsConfig2CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsConfig2TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
 
-            midG = uigridlayout(gl, [1 5], 'ColumnWidth',{'fit',120,'fit',120,'1x'}, 'Padding',[0 0 0 0]);
+            midG = uigridlayout(gl, [1 7], 'ColumnWidth',{'fit',120,'fit',120,170,'1x','fit'}, 'Padding',[0 0 0 0], 'ColumnSpacing',8);
             midG.Layout.Row = 2;
             uilabel(midG,'Text','X mode','FontWeight','bold');
             app.ResultsXScaleDropDown = uidropdown(midG, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             uilabel(midG,'Text','Y mode','FontWeight','bold');
             app.ResultsYScaleDropDown = uidropdown(midG, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.OpenStreamTableBtn = uibutton(midG, 'push', 'Text','Open Stream Table', ...
+                'FontWeight','bold', 'BackgroundColor',[0.88 0.93 0.99], ...
+                'ButtonPushedFcn',@(~,~) app.openStreamTablePopup());
             app.ResultsPlotStatusLabel = uilabel(midG, 'Text','Run solve to populate iteration snapshots.', 'FontColor',[0.35 0.35 0.35]);
+            uilabel(midG, 'Text','');
 
             axP = uipanel(gl, 'Title','Results Trends', 'FontWeight','bold');
             axP.Layout.Row = 3;
@@ -690,6 +704,7 @@ classdef MathLabApp < handle
             app.refreshFlowsheetDiagram();
             app.updateDOF();
             app.refreshUnitTablePopup();
+            app.refreshStreamTablePopup();
             app.updateSensDropdowns();
             app.refreshSpeciesPropsTable();
             app.StreamNameField.Value = 'S2';
@@ -1074,6 +1089,7 @@ classdef MathLabApp < handle
             app.refreshFlowsheetDiagram();
             app.updateDOF();
             app.refreshUnitTablePopup();
+            app.refreshStreamTablePopup();
         end
 
         function idx = getSelectedUnitIdx(app)
@@ -1099,6 +1115,7 @@ classdef MathLabApp < handle
             app.refreshFlowsheetDiagram();
             app.updateDOF();
             app.refreshUnitTablePopup();
+            app.refreshStreamTablePopup();
         end
     end
 
@@ -2142,6 +2159,7 @@ classdef MathLabApp < handle
         function openUnitTablePopup(app)
             if ~isempty(app.UnitTableFig) && isvalid(app.UnitTableFig)
                 app.refreshUnitTablePopup();
+            app.refreshStreamTablePopup();
                 app.UnitTableFig.Visible = 'on';
                 return;
             end
@@ -2176,6 +2194,7 @@ classdef MathLabApp < handle
             app.UnitTableStatusLabel.Layout.Row = 3;
 
             app.refreshUnitTablePopup();
+            app.refreshStreamTablePopup();
         end
 
         function onUnitTablePopupClosed(app, src)
@@ -2629,6 +2648,7 @@ classdef MathLabApp < handle
             app.refreshStreamTables();
             app.refreshResultsTable();
             app.refreshUnitTablePopup();
+            app.refreshStreamTablePopup();
         end
 
         function prefs = mergeUnitPrefs(~, inPrefs)
@@ -2648,6 +2668,216 @@ classdef MathLabApp < handle
             if ~isempty(app.PressureUnitDropDown), app.PressureUnitDropDown.Value = app.unitPrefs.pressure; end
             if ~isempty(app.DutyUnitDropDown), app.DutyUnitDropDown.Value = app.unitPrefs.duty; end
             if ~isempty(app.PowerUnitDropDown), app.PowerUnitDropDown.Value = app.unitPrefs.power; end
+        end
+
+        function openStreamTablePopup(app)
+            if ~isempty(app.StreamTableFig) && isvalid(app.StreamTableFig)
+                app.refreshStreamTablePopup();
+                app.StreamTableFig.Visible = 'on';
+                return;
+            end
+
+            app.StreamTableFig = uifigure('Name','MathLab — Solved Stream Table', ...
+                'Position',[140 90 1060 560], 'Color',[0.97 0.97 0.98]);
+            app.StreamTableFig.CloseRequestFcn = @(src,~) app.onStreamTablePopupClosed(src);
+
+            gl = uigridlayout(app.StreamTableFig, [3 1], ...
+                'RowHeight',{74,'1x',30}, 'Padding',[10 10 10 10], 'RowSpacing',6);
+
+            topG = uigridlayout(gl, [2 6], 'ColumnWidth',{'fit',90,220,'fit','1x',100}, ...
+                'Padding',[0 0 0 0], 'ColumnSpacing',6, 'RowSpacing',4);
+            topG.Layout.Row = 1;
+            uilabel(topG, 'Text','Solved Stream Table', 'FontWeight','bold', 'FontSize',13);
+            uilabel(topG, 'Text','Format');
+            app.StreamExportFormatDD = uidropdown(topG, 'Items', {'.mat','.csv'}, 'Value','.mat', ...
+                'ValueChangedFcn', @(~,~) app.onStreamExportFormatChanged());
+            uilabel(topG, 'Text','Filename');
+            app.StreamExportFileField = uieditfield(topG,'text','Value',app.defaultStreamExportFilename('mat'));
+            uibutton(topG, 'push', 'Text','Save', 'FontWeight','bold', ...
+                'ButtonPushedFcn',@(~,~) app.exportStreamTableFromPopup());
+
+            uilabel(topG, 'Text','Destination');
+            app.StreamExportPathField = uieditfield(topG,'text', ...
+                'Value', app.resolveInitialExportPath(), 'Editable','off');
+            uibutton(topG, 'push', 'Text','Choose...', ...
+                'ButtonPushedFcn',@(~,~) app.chooseStreamExportPath());
+            uilabel(topG, 'Text','');
+            uilabel(topG, 'Text','');
+            uibutton(topG, 'push', 'Text','Default Save Path', ...
+                'ButtonPushedFcn',@(~,~) app.saveStreamTableWithDefaults());
+
+            app.StreamTable = uitable(gl, 'ColumnEditable', false);
+            app.StreamTable.Layout.Row = 2;
+
+            app.StreamTableStatusLabel = uilabel(gl, 'Text','', 'FontColor',[0.3 0.3 0.3]);
+            app.StreamTableStatusLabel.Layout.Row = 3;
+
+            app.refreshStreamTablePopup();
+        end
+
+        function onStreamTablePopupClosed(app, src)
+            if ~isempty(src) && isvalid(src)
+                delete(src);
+            end
+            app.StreamTableFig = [];
+            app.StreamTable = [];
+            app.StreamTableStatusLabel = [];
+            app.StreamExportFormatDD = [];
+            app.StreamExportFileField = [];
+            app.StreamExportPathField = [];
+        end
+
+        function refreshStreamTablePopup(app)
+            if isempty(app.StreamTable) || ~isvalid(app.StreamTable)
+                return;
+            end
+            T = app.buildDisplayStreamTable();
+            app.StreamTable.Data = T;
+            app.StreamTable.ColumnName = T.Properties.VariableNames;
+            if isempty(app.lastSolver) || isempty(app.lastFlowsheet)
+                msg = sprintf('Showing current stream state (%d row(s)). Run Solve for final solved table.', height(T));
+            else
+                msg = sprintf('Solved stream table (%d row(s)).', height(T));
+            end
+            if ~isempty(app.StreamTableStatusLabel) && isvalid(app.StreamTableStatusLabel)
+                app.StreamTableStatusLabel.Text = msg;
+            end
+        end
+
+        function T = buildDisplayStreamTable(app)
+            if ~isempty(app.lastFlowsheet)
+                T = app.lastFlowsheet.streamTable('showAliasColumn', true);
+            else
+                fsTmp = proc.Flowsheet(app.speciesNames);
+                for i = 1:numel(app.streams)
+                    s = app.streams{i};
+                    fsTmp.addStream(s, char(string(s.name)));
+                end
+                T = fsTmp.streamTable('showAliasColumn', true);
+            end
+            T = app.convertDisplayStreamTable(T);
+            T.Properties.VariableNames = app.displayColumnNames(T.Properties.VariableNames);
+        end
+
+        function fmt = normalizeStreamTableExportFormat(~, fmt)
+            fmt = lower(strtrim(char(string(fmt))));
+            if startsWith(fmt,'.')
+                fmt = fmt(2:end);
+            end
+            if ~ismember(fmt, {'mat','csv'})
+                error('MathLab:StreamTable:UnsupportedFormat', ...
+                    'Unsupported stream table export format "%s". Use mat or csv.', fmt);
+            end
+        end
+
+        function fname = defaultStreamExportFilename(app, fmt)
+            fmt = app.normalizeStreamTableExportFormat(fmt);
+            fname = app.autoFileName('stream_table', fmt);
+        end
+
+        function onStreamExportFormatChanged(app)
+            if isempty(app.StreamExportFormatDD) || isempty(app.StreamExportFileField) ...
+                    || ~isvalid(app.StreamExportFormatDD) || ~isvalid(app.StreamExportFileField)
+                return;
+            end
+            fmt = app.normalizeStreamTableExportFormat(app.StreamExportFormatDD.Value);
+            curr = strtrim(app.StreamExportFileField.Value);
+            if isempty(curr)
+                app.StreamExportFileField.Value = app.defaultStreamExportFilename(fmt);
+                return;
+            end
+            [~, base, ext] = fileparts(curr);
+            if isempty(base)
+                base = 'stream_table';
+            end
+            if isempty(ext)
+                app.StreamExportFileField.Value = sprintf('%s.%s', base, fmt);
+            else
+                app.StreamExportFileField.Value = sprintf('%s.%s', base, fmt);
+            end
+        end
+
+        function chooseStreamExportPath(app)
+            startPath = app.resolveInitialExportPath();
+            sel = uigetdir(startPath, 'Choose Stream Table Export Folder');
+            if isequal(sel, 0)
+                return;
+            end
+            app.lastExportPath = char(string(sel));
+            if ~isempty(app.StreamExportPathField) && isvalid(app.StreamExportPathField)
+                app.StreamExportPathField.Value = app.lastExportPath;
+            end
+        end
+
+        function exportStreamTableFromPopup(app)
+            if isempty(app.StreamExportFormatDD) || ~isvalid(app.StreamExportFormatDD)
+                return;
+            end
+            fmt = app.normalizeStreamTableExportFormat(app.StreamExportFormatDD.Value);
+            folder = app.resolveInitialExportPath();
+            if ~isempty(app.StreamExportPathField) && isvalid(app.StreamExportPathField)
+                folder = strtrim(app.StreamExportPathField.Value);
+            end
+            if isempty(folder)
+                folder = app.ensureOutputDir('results');
+            end
+            app.ensureWritableDir(folder);
+            app.lastExportPath = char(string(folder));
+
+            fname = '';
+            if ~isempty(app.StreamExportFileField) && isvalid(app.StreamExportFileField)
+                fname = strtrim(app.StreamExportFileField.Value);
+            end
+            if isempty(fname)
+                fname = app.defaultStreamExportFilename(fmt);
+            end
+            [~, base, ext] = fileparts(fname);
+            if isempty(base)
+                base = 'stream_table';
+            end
+            if isempty(ext)
+                fname = sprintf('%s.%s', base, fmt);
+            else
+                fname = sprintf('%s.%s', base, fmt);
+            end
+
+            T = app.buildDisplayStreamTable();
+            filepath = fullfile(folder, fname);
+            if strcmp(fmt,'csv')
+                writetable(T, filepath);
+            else
+                streamTable = T; %#ok<NASGU>
+                save(filepath, 'streamTable');
+            end
+
+            msg = sprintf('Stream table exported to %s', filepath);
+            app.setStatus(msg);
+            if ~isempty(app.StreamTableStatusLabel) && isvalid(app.StreamTableStatusLabel)
+                app.StreamTableStatusLabel.Text = msg;
+            end
+        end
+
+        function saveStreamTableWithDefaults(app)
+            if isempty(app.StreamExportFormatDD) || ~isvalid(app.StreamExportFormatDD)
+                return;
+            end
+            fmt = app.normalizeStreamTableExportFormat(app.StreamExportFormatDD.Value);
+            app.lastExportPath = app.resolveInitialExportPath();
+            if ~isempty(app.StreamExportPathField) && isvalid(app.StreamExportPathField)
+                app.StreamExportPathField.Value = app.lastExportPath;
+            end
+            if ~isempty(app.StreamExportFileField) && isvalid(app.StreamExportFileField)
+                app.StreamExportFileField.Value = app.defaultStreamExportFilename(fmt);
+            end
+            app.exportStreamTableFromPopup();
+        end
+
+        function pathOut = resolveInitialExportPath(app)
+            pathOut = strtrim(char(string(app.lastExportPath)));
+            if isempty(pathOut) || ~isfolder(pathOut)
+                pathOut = app.ensureOutputDir('results');
+                app.lastExportPath = pathOut;
+            end
         end
 
         function fmt = normalizeUnitTableExportFormat(~, fmt)
@@ -3035,9 +3265,10 @@ classdef MathLabApp < handle
                 uialert(app.Fig,'No solver results yet. Run the solver first.','No Results');
                 return;
             end
-            outDir = app.ensureOutputDir('results');
+            outDir = app.resolveInitialExportPath();
             fname = app.autoFileName('results', 'mat');
             filepath = fullfile(outDir, fname);
+            app.lastExportPath = outDir;
             solverData = app.lastSolver; %#ok
             if ~isempty(app.lastFlowsheet)
                 streamTable = app.lastFlowsheet.streamTable('showAliasColumn', true); %#ok
@@ -3135,6 +3366,9 @@ classdef MathLabApp < handle
             if isfield(cfg,'unitPrefs') && isstruct(cfg.unitPrefs)
                 app.unitPrefs = app.mergeUnitPrefs(cfg.unitPrefs);
             end
+            if isfield(cfg,'lastExportPath')
+                app.lastExportPath = char(string(cfg.lastExportPath));
+            end
             app.applyUnitPrefsToControls();
 
             app.refreshStreamTables();
@@ -3142,6 +3376,7 @@ classdef MathLabApp < handle
             app.refreshFlowsheetDiagram();
             app.updateDOF();
             app.refreshUnitTablePopup();
+            app.refreshStreamTablePopup();
             app.updateSensDropdowns();
             app.refreshSpeciesPropsTable();
 
@@ -3893,12 +4128,13 @@ classdef MathLabApp < handle
             % Project title
             cfg.projectTitle = app.projectTitle;
             cfg.unitPrefs = app.unitPrefs;
+            cfg.lastExportPath = app.lastExportPath;
 
             app.validateConfigPayload(cfg);
         end
 
         function validateConfigPayload(~, cfg)
-            requiredTop = {'speciesNames','speciesMW','streams','unitDefs','maxIter','tolAbs','projectTitle','unitPrefs'};
+            requiredTop = {'speciesNames','speciesMW','streams','unitDefs','maxIter','tolAbs','projectTitle','unitPrefs','lastExportPath'};
             for i = 1:numel(requiredTop)
                 key = requiredTop{i};
                 if ~isfield(cfg, key)
@@ -3943,6 +4179,9 @@ classdef MathLabApp < handle
 
             if ~isstruct(cfg.unitPrefs)
                 error('MathLab:SaveConfig:InvalidUnits', 'unitPrefs must be a struct.');
+            end
+            if ~(ischar(cfg.lastExportPath) || (isstring(cfg.lastExportPath) && isscalar(cfg.lastExportPath)))
+                error('MathLab:SaveConfig:InvalidPath', 'lastExportPath must be a text scalar.');
             end
         end
 
