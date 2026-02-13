@@ -1947,23 +1947,67 @@ classdef MathLabApp < handle
             end
         end
 
-        function exportUnitTableToOutput(app, fmt)
-            T = app.buildUnitTable();
-            outDir = app.ensureOutputDir('results');
-            switch lower(fmt)
-                case 'csv'
-                    filepath = fullfile(outDir, app.autoFileName('unit_table', 'csv'));
-                    writetable(T, filepath);
-                case 'mat'
-                    filepath = fullfile(outDir, app.autoFileName('unit_table', 'mat'));
-                    unitTable = T; %#ok<NASGU>
-                    save(filepath, 'unitTable');
-                otherwise
-                    error('MathLab:UnitTable:UnsupportedFormat', 'Unsupported export format "%s"', fmt);
+        function fmt = normalizeUnitTableExportFormat(~, fmt)
+            if ~(ischar(fmt) || (isstring(fmt) && isscalar(fmt)))
+                error('MathLab:UnitTable:InvalidFormat', ...
+                    'Unit table export format must be a non-empty text scalar (''csv'' or ''mat'').');
             end
-            app.setStatus(sprintf('Unit table exported to %s', filepath));
+            fmt = lower(strtrim(char(string(fmt))));
+            if isempty(fmt)
+                error('MathLab:UnitTable:InvalidFormat', ...
+                    'Unit table export format must be a non-empty text scalar (''csv'' or ''mat'').');
+            end
+            if ~ismember(fmt, {'csv','mat'})
+                error('MathLab:UnitTable:UnsupportedFormat', ...
+                    'Unsupported unit table export format "%s". Supported formats: csv, mat.', fmt);
+            end
+        end
+
+        function exportUnitTableToOutput(app, fmt)
+            fmt = app.normalizeUnitTableExportFormat(fmt);
+
+            outDir = app.ensureOutputDir('results');
+            outDirMsg = char(string(outDir));
+            if isempty(strtrim(outDirMsg)) || ~isfolder(outDirMsg)
+                reason = sprintf('Output directory is not valid: %s', outDirMsg);
+                app.setStatus(sprintf('Unit table export failed: %s', reason));
+                if ~isempty(app.UnitTableStatusLabel) && isvalid(app.UnitTableStatusLabel)
+                    app.UnitTableStatusLabel.Text = sprintf('Unit table export failed: %s', reason);
+                end
+                uialert(app.Fig, sprintf(['Failed to export unit table.\nResolved output directory: %s\nReason: %s'], outDirMsg, reason), ...
+                    'Unit Table Export Failed', 'Icon', 'error');
+                return;
+            end
+
+            try
+                T = app.buildUnitResultsTable();
+                switch fmt
+                    case 'csv'
+                        filepath = fullfile(outDirMsg, app.autoFileName('unit_table', 'csv'));
+                        writetable(T, filepath);
+                    case 'mat'
+                        filepath = fullfile(outDirMsg, app.autoFileName('unit_table', 'mat'));
+                        unitTable = T; %#ok<NASGU>
+                        save(filepath, 'unitTable');
+                    otherwise
+                        error('MathLab:UnitTable:UnsupportedFormat', ...
+                            'Unsupported unit table export format "%s". Supported formats: csv, mat.', fmt);
+                end
+            catch ME
+                reason = strtrim(ME.message);
+                failMsg = sprintf('Unit table export failed: %s (output dir: %s)', reason, outDirMsg);
+                app.setStatus(failMsg);
+                if ~isempty(app.UnitTableStatusLabel) && isvalid(app.UnitTableStatusLabel)
+                    app.UnitTableStatusLabel.Text = failMsg;
+                end
+                uialert(app.Fig, sprintf(['Failed to export unit table as %s.\nResolved output directory: %s\nReason: %s'], ...
+                    upper(fmt), outDirMsg, reason), 'Unit Table Export Failed', 'Icon', 'error');
+                return;
+            end
+
+            app.setStatus(sprintf('Unit table exported to %s (output dir: %s)', filepath, outDirMsg));
             if ~isempty(app.UnitTableStatusLabel) && isvalid(app.UnitTableStatusLabel)
-                app.UnitTableStatusLabel.Text = sprintf('Exported %s (%d rows): %s', upper(fmt), height(T), filepath);
+                app.UnitTableStatusLabel.Text = sprintf('Exported %s (%d rows): %s [dir: %s]', upper(fmt), height(T), filepath, outDirMsg);
             end
         end
     end
@@ -2330,25 +2374,70 @@ classdef MathLabApp < handle
             end
         end
 
-        function exportUnitTableToOutput(app, fmt)
-            T = app.buildUnitResultsTable();
-            outDir = app.ensureOutputDir('results');
-            switch lower(fmt)
-                case 'csv'
-                    filepath = fullfile(outDir, app.autoFileName('unit_table', 'csv'));
-                    writetable(T, filepath);
-                case 'mat'
-                    filepath = fullfile(outDir, app.autoFileName('unit_table', 'mat'));
-                    unitTable = T; %#ok<NASGU>
-                    save(filepath, 'unitTable');
-                otherwise
-                    error('MathLab:UnitTable:UnsupportedFormat', 'Unsupported export format "%s"', fmt);
+        function fmt = normalizeUnitTableExportFormat(~, fmt)
+            if ~(ischar(fmt) || (isstring(fmt) && isscalar(fmt)))
+                error('MathLab:UnitTable:InvalidFormat', ...
+                    'Unit table export format must be a non-empty text scalar (''csv'' or ''mat'').');
             end
-            app.setStatus(sprintf('Unit table exported to %s', filepath));
-            if ~isempty(app.UnitTableStatusLabel) && isvalid(app.UnitTableStatusLabel)
-                app.UnitTableStatusLabel.Text = sprintf('Exported %s (%d rows): %s', upper(fmt), height(T), filepath);
+            fmt = lower(strtrim(char(string(fmt))));
+            if isempty(fmt)
+                error('MathLab:UnitTable:InvalidFormat', ...
+                    'Unit table export format must be a non-empty text scalar (''csv'' or ''mat'').');
+            end
+            if ~ismember(fmt, {'csv','mat'})
+                error('MathLab:UnitTable:UnsupportedFormat', ...
+                    'Unsupported unit table export format "%s". Supported formats: csv, mat.', fmt);
             end
         end
+
+        function exportUnitTableToOutput(app, fmt)
+            fmt = app.normalizeUnitTableExportFormat(fmt);
+
+            outDir = app.ensureOutputDir('results');
+            outDirMsg = char(string(outDir));
+            if isempty(strtrim(outDirMsg)) || ~isfolder(outDirMsg)
+                reason = sprintf('Output directory is not valid: %s', outDirMsg);
+                app.setStatus(sprintf('Unit table export failed: %s', reason));
+                if ~isempty(app.UnitTableStatusLabel) && isvalid(app.UnitTableStatusLabel)
+                    app.UnitTableStatusLabel.Text = sprintf('Unit table export failed: %s', reason);
+                end
+                uialert(app.Fig, sprintf(['Failed to export unit table.\nResolved output directory: %s\nReason: %s'], outDirMsg, reason), ...
+                    'Unit Table Export Failed', 'Icon', 'error');
+                return;
+            end
+
+            try
+                T = app.buildUnitResultsTable();
+                switch fmt
+                    case 'csv'
+                        filepath = fullfile(outDirMsg, app.autoFileName('unit_table', 'csv'));
+                        writetable(T, filepath);
+                    case 'mat'
+                        filepath = fullfile(outDirMsg, app.autoFileName('unit_table', 'mat'));
+                        unitTable = T; %#ok<NASGU>
+                        save(filepath, 'unitTable');
+                    otherwise
+                        error('MathLab:UnitTable:UnsupportedFormat', ...
+                            'Unsupported unit table export format "%s". Supported formats: csv, mat.', fmt);
+                end
+            catch ME
+                reason = strtrim(ME.message);
+                failMsg = sprintf('Unit table export failed: %s (output dir: %s)', reason, outDirMsg);
+                app.setStatus(failMsg);
+                if ~isempty(app.UnitTableStatusLabel) && isvalid(app.UnitTableStatusLabel)
+                    app.UnitTableStatusLabel.Text = failMsg;
+                end
+                uialert(app.Fig, sprintf(['Failed to export unit table as %s.\nResolved output directory: %s\nReason: %s'], ...
+                    upper(fmt), outDirMsg, reason), 'Unit Table Export Failed', 'Icon', 'error');
+                return;
+            end
+
+            app.setStatus(sprintf('Unit table exported to %s (output dir: %s)', filepath, outDirMsg));
+            if ~isempty(app.UnitTableStatusLabel) && isvalid(app.UnitTableStatusLabel)
+                app.UnitTableStatusLabel.Text = sprintf('Exported %s (%d rows): %s [dir: %s]', upper(fmt), height(T), filepath, outDirMsg);
+            end
+        end
+
     end
 
     % =====================================================================
