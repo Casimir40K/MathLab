@@ -60,10 +60,24 @@ classdef MathLabApp < handle
 
         % -- Tab 5: Results --
         ResultsTab
-        ResultsTable
-        ResultsShowAliasesCheck
-        ResultsShowAliasColumnCheck
-        ResultsNameModeLabel
+        ResultsAxes
+        ResultsXScaleDropDown
+        ResultsYScaleDropDown
+        ResultsConfig1XVarDD
+        ResultsConfig1YVarDD
+        ResultsConfig1TargetDD
+        ResultsConfig1CompDD
+        ResultsConfig1NormCheck
+        ResultsConfig1ScaleField
+        ResultsConfig1AxisDD
+        ResultsConfig2XVarDD
+        ResultsConfig2YVarDD
+        ResultsConfig2TargetDD
+        ResultsConfig2CompDD
+        ResultsConfig2NormCheck
+        ResultsConfig2ScaleField
+        ResultsConfig2AxisDD
+        ResultsPlotStatusLabel
 
         % -- Tab 6: Sensitivity --
         SensTab
@@ -108,6 +122,9 @@ classdef MathLabApp < handle
         unitDefs cell = {}    % serializable unit definitions for save/load
         lastSolver = []
         lastFlowsheet = []
+        resultsSnapshots cell = {}
+        resultsSnapshotIters double = []
+        resultsSnapshotResiduals double = []
         projectTitle char = 'MathLab_Project'
         unitPrefs struct = struct('flow','kmol/s','temperature','K','pressure','Pa','duty','kW','power','kW')
     end
@@ -489,21 +506,48 @@ classdef MathLabApp < handle
         function buildResultsTab(app)
             t = uitab(app.Tabs, 'Title', ' Results ');
             app.ResultsTab = t;
-            gl = uigridlayout(t, [2 1], 'RowHeight',{34,'1x'}, ...
+            gl = uigridlayout(t, [3 1], 'RowHeight',{130,28,'1x'}, ...
                 'Padding',[12 12 12 12], 'RowSpacing',8);
 
-            topG = uigridlayout(gl, [1 3], 'ColumnWidth',{'fit',120,'1x'}, ...
+            topG = uigridlayout(gl, [2 8], 'ColumnWidth',{'fit','1x','1x',90,80,100,70,'1x'}, ...
                 'Padding',[0 0 0 0], 'ColumnSpacing',8);
             topG.Layout.Row = 1;
-            uilabel(topG, 'Text','Simulation Results', 'FontWeight','bold');
-            app.OpenUnitTableBtn = uibutton(topG,'push','Text','Open Unit Table', ...
-                'FontWeight','bold', 'BackgroundColor',[0.90 0.88 0.98], ...
-                'ButtonPushedFcn',@(~,~) app.openUnitTablePopup());
-            uilabel(topG, 'Text','Inspect solved unit metrics (duty/power/conversion/etc.) in the unit table popup.', ...
-                'FontColor',[0.35 0.35 0.35]);
+            uilabel(topG, 'Text','Plot 1', 'FontWeight','bold');
+            app.ResultsConfig1XVarDD = uidropdown(topG, 'Items',{'iteration','flow','T','P','conversion','efficiency','duty','power','y(i)'}, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1YVarDD = uidropdown(topG, 'Items',{'flow','T','P','conversion','efficiency','duty','power','y(i)'}, 'Value','flow', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1AxisDD = uidropdown(topG, 'Items',{'left','right'}, 'Value','left', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1ScaleField = uieditfield(topG, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1NormCheck = uicheckbox(topG, 'Text','normalize', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig1TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
 
-            app.ResultsTable = uitable(gl);
-            app.ResultsTable.Layout.Row = 2;
+            uilabel(topG, 'Text','Plot 2', 'FontWeight','bold');
+            app.ResultsConfig2XVarDD = uidropdown(topG, 'Items',{'iteration','flow','T','P','conversion','efficiency','duty','power','y(i)'}, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2YVarDD = uidropdown(topG, 'Items',{'flow','T','P','conversion','efficiency','duty','power','y(i)'}, 'Value','T', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2AxisDD = uidropdown(topG, 'Items',{'left','right'}, 'Value','right', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2ScaleField = uieditfield(topG, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2NormCheck = uicheckbox(topG, 'Text','normalize', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsConfig2TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+
+            midG = uigridlayout(gl, [1 5], 'ColumnWidth',{'fit',120,'fit',120,'1x'}, 'Padding',[0 0 0 0]);
+            midG.Layout.Row = 2;
+            uilabel(midG,'Text','X mode','FontWeight','bold');
+            app.ResultsXScaleDropDown = uidropdown(midG, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            uilabel(midG,'Text','Y mode','FontWeight','bold');
+            app.ResultsYScaleDropDown = uidropdown(midG, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsPlotStatusLabel = uilabel(midG, 'Text','Run solve to populate iteration snapshots.', 'FontColor',[0.35 0.35 0.35]);
+
+            axP = uipanel(gl, 'Title','Results Trends', 'FontWeight','bold');
+            axP.Layout.Row = 3;
+            axG = uigridlayout(axP,[1 1],'Padding',[4 4 4 4]);
+            app.ResultsAxes = uiaxes(axG);
+            grid(app.ResultsAxes,'on');
+            xlabel(app.ResultsAxes,'X');
+            ylabel(app.ResultsAxes,'Y');
+            title(app.ResultsAxes,'Iteration snapshots and solved-state metrics');
+
+            app.refreshResultsTargetOptions();
         end
 
         % ================================================================
@@ -1842,9 +1886,15 @@ classdef MathLabApp < handle
             app.LogArea.Value = {'Solving...'};
             drawnow;
 
+            app.resultsSnapshots = {};
+            app.resultsSnapshotIters = [];
+            app.resultsSnapshotResiduals = [];
+            app.captureResultsSnapshot(0, NaN);
+
             % Callback for real-time updates
             function iterCb(iter, rNorm)
                 addpoints(hLine, iter, rNorm);
+                app.captureResultsSnapshot(iter, rNorm);
                 drawnow limitrate;
             end
 
@@ -1858,6 +1908,8 @@ classdef MathLabApp < handle
                     sprintf('Converged in %d iterations', numel(solver.residualHistory)-1));
 
                 app.LogArea.Value = cellstr(solver.logLines);
+
+                app.captureResultsSnapshot(numel(solver.residualHistory)-1, solver.residualHistory(end));
 
                 app.refreshResultsTable();
 
@@ -1876,31 +1928,207 @@ classdef MathLabApp < handle
 
 
         function refreshResultsTable(app)
-            if isempty(app.lastFlowsheet)
-                app.ResultsTable.Data = table();
-                app.ResultsTable.ColumnName = {};
+            if isempty(app.ResultsAxes) || ~isvalid(app.ResultsAxes)
                 return;
             end
 
-            includeAliases = ~isempty(app.ResultsShowAliasesCheck) && app.ResultsShowAliasesCheck.Value;
-            showAliasColumn = true;
-            if ~isempty(app.ResultsShowAliasColumnCheck)
-                showAliasColumn = app.ResultsShowAliasColumnCheck.Value;
+            cla(app.ResultsAxes);
+            yyaxis(app.ResultsAxes,'left');
+            yyaxis(app.ResultsAxes,'right');
+            yyaxis(app.ResultsAxes,'left');
+            hold(app.ResultsAxes,'on');
+            app.ResultsAxes.XScale = app.ResultsXScaleDropDown.Value;
+            app.ResultsAxes.YScale = app.ResultsYScaleDropDown.Value;
+
+            plotted = false;
+            plotted = app.plotResultsConfig(1) || plotted;
+            plotted = app.plotResultsConfig(2) || plotted;
+
+            if plotted
+                legend(app.ResultsAxes,'Location','best');
+                app.ResultsPlotStatusLabel.Text = sprintf('Snapshots: %d', numel(app.resultsSnapshots));
+            else
+                app.ResultsPlotStatusLabel.Text = 'No plottable data. Solve first and verify target/variables.';
+            end
+            hold(app.ResultsAxes,'off');
+            app.refreshResultsTargetOptions();
+        end
+
+        function ok = plotResultsConfig(app, idx)
+            ok = false;
+            cfg = app.resultsConfigControls(idx);
+            if isempty(cfg.targetDD.Items)
+                return;
+            end
+            x = app.resultsSeriesForConfig(cfg.xVarDD.Value, cfg.targetDD.Value, cfg.compDD.Value);
+            y = app.resultsSeriesForConfig(cfg.yVarDD.Value, cfg.targetDD.Value, cfg.compDD.Value);
+            if isempty(x) || isempty(y)
+                return;
+            end
+            n = min(numel(x), numel(y));
+            x = x(1:n); y = y(1:n);
+            mask = isfinite(x) & isfinite(y);
+            x = x(mask); y = y(mask);
+            if isempty(x)
+                return;
+            end
+            if cfg.normCheck.Value
+                y0 = max(abs(y(1)), eps);
+                y = y ./ y0;
+            end
+            y = y .* cfg.scaleField.Value;
+            yyaxis(app.ResultsAxes, cfg.axisDD.Value);
+            plot(app.ResultsAxes, x, y, '-o', 'LineWidth',1.5, 'MarkerSize',4, ...
+                'DisplayName', sprintf('Plot %d: %s vs %s @ %s', idx, cfg.yVarDD.Value, cfg.xVarDD.Value, cfg.targetDD.Value));
+            if strcmp(cfg.axisDD.Value,'left')
+                ylabel(app.ResultsAxes,'Left axis');
+            else
+                ylabel(app.ResultsAxes,'Right axis');
+            end
+            xlabel(app.ResultsAxes, 'Configured X variable');
+            ok = true;
+        end
+
+        function s = resultsSeriesForConfig(app, varName, targetName, compIdxStr)
+            s = [];
+            n = numel(app.resultsSnapshots);
+            if n == 0
+                return;
+            end
+            s = nan(n,1);
+            compIdx = str2double(compIdxStr);
+            for k = 1:n
+                snap = app.resultsSnapshots{k};
+                s(k) = app.extractSnapshotValue(snap, varName, targetName, compIdx);
+            end
+            if strcmp(varName,'iteration')
+                s = app.resultsSnapshotIters(:);
+            end
+        end
+
+        function val = extractSnapshotValue(app, snap, varName, targetName, compIdx)
+            val = NaN;
+            if strcmp(varName,'iteration')
+                if isfield(snap,'iteration'), val = snap.iteration; end
+                return;
+            elseif strcmp(varName,'residual')
+                if isfield(snap,'residual'), val = snap.residual; end
+                return;
             end
 
-            T = app.lastFlowsheet.streamTable( ...
-                'includeAliases', includeAliases, ...
-                'showAliasColumn', showAliasColumn);
-            T = app.convertDisplayStreamTable(T);
-            app.ResultsTable.Data = T;
-            app.ResultsTable.ColumnName = app.displayColumnNames(T.Properties.VariableNames);
+            if startsWith(targetName,'Stream: ')
+                key = strtrim(extractAfter(targetName,'Stream: '));
+                if ~isfield(snap.streams, matlab.lang.makeValidName(key)), return; end
+                st = snap.streams.(matlab.lang.makeValidName(key));
+                switch varName
+                    case 'flow', val = app.fromSI(st.n_dot, 'flow');
+                    case 'T', val = app.fromSI(st.T, 'temperature');
+                    case 'P', val = app.fromSI(st.P, 'pressure');
+                    case 'y(i)'
+                        if isfinite(compIdx) && compIdx >= 1 && compIdx <= numel(st.y)
+                            val = st.y(compIdx);
+                        end
+                end
+            elseif startsWith(targetName,'Unit: ')
+                key = strtrim(extractAfter(targetName,'Unit: '));
+                fn = matlab.lang.makeValidName(key);
+                if ~isfield(snap.units, fn), return; end
+                uu = snap.units.(fn);
+                switch varName
+                    case 'conversion', if isfield(uu,'conversion'), val = uu.conversion; end
+                    case 'efficiency', if isfield(uu,'eta'), val = uu.eta; end
+                    case 'duty', if isfield(uu,'duty'), val = app.fromSI(uu.duty, 'duty'); end
+                    case 'power', if isfield(uu,'power'), val = app.fromSI(uu.power, 'power'); end
+                end
+            end
+        end
 
-            if includeAliases
-                app.ResultsNameModeLabel.Text = 'Alias rows are enabled: a single stream handle may appear more than once under different names.';
-            elseif showAliasColumn
-                app.ResultsNameModeLabel.Text = 'Canonical rows shown. Alias names (if any) are listed in the aliases column.';
+        function captureResultsSnapshot(app, iter, rNorm)
+            if isempty(app.lastFlowsheet)
+                return;
+            end
+            snap = struct();
+            snap.iteration = iter;
+            snap.residual = rNorm;
+            snap.streams = struct();
+            snap.units = struct();
+
+            for i = 1:numel(app.lastFlowsheet.streamDisplayRefs)
+                s = app.lastFlowsheet.streamDisplayRefs{i};
+                name = matlab.lang.makeValidName(char(string(app.lastFlowsheet.streamDisplayNames{i})));
+                snap.streams.(name) = struct('n_dot',s.n_dot,'T',s.T,'P',s.P,'y',s.y(:).');
+            end
+
+            for i = 1:numel(app.lastFlowsheet.units)
+                u = app.lastFlowsheet.units{i};
+                uname = sprintf('U%d_%s', i, app.shortTypeName(u));
+                fn = matlab.lang.makeValidName(uname);
+                us = struct();
+                if isprop(u,'conversion'), us.conversion = u.conversion; end
+                if isprop(u,'eta'), us.eta = u.eta; end
+                if ismethod(u,'getDuty')
+                    try, us.duty = u.getDuty(); catch, end
+                elseif isprop(u,'duty')
+                    us.duty = u.duty;
+                end
+                if ismethod(u,'getPower')
+                    try, us.power = u.getPower(); catch, end
+                end
+                snap.units.(fn) = us;
+            end
+
+            app.resultsSnapshots{end+1} = snap;
+            app.resultsSnapshotIters(end+1,1) = iter;
+            app.resultsSnapshotResiduals(end+1,1) = rNorm;
+        end
+
+        function refreshResultsTargetOptions(app)
+            if isempty(app.ResultsConfig1TargetDD)
+                return;
+            end
+            targets = {};
+            if ~isempty(app.lastFlowsheet)
+                for i = 1:numel(app.lastFlowsheet.streamDisplayNames)
+                    targets{end+1} = sprintf('Stream: %s', app.lastFlowsheet.streamDisplayNames{i}); %#ok<AGROW>
+                end
+                for i = 1:numel(app.lastFlowsheet.units)
+                    targets{end+1} = sprintf('Unit: U%d_%s', i, app.shortTypeName(app.lastFlowsheet.units{i})); %#ok<AGROW>
+                end
+            end
+            if isempty(targets)
+                targets = {'(none)'};
+            end
+            dds = {app.ResultsConfig1TargetDD, app.ResultsConfig2TargetDD};
+            for i = 1:numel(dds)
+                dd = dds{i};
+                prev = dd.Value;
+                dd.Items = targets;
+                if any(strcmp(targets, prev))
+                    dd.Value = prev;
+                else
+                    dd.Value = targets{1};
+                end
+            end
+
+            nSpec = max(1, numel(app.speciesNames));
+            compItems = arrayfun(@num2str, 1:nSpec, 'Uni', false);
+            app.ResultsConfig1CompDD.Items = compItems;
+            app.ResultsConfig2CompDD.Items = compItems;
+            app.ResultsConfig1CompDD.Value = compItems{1};
+            app.ResultsConfig2CompDD.Value = compItems{1};
+        end
+
+        function cfg = resultsConfigControls(app, idx)
+            if idx == 1
+                cfg = struct('xVarDD',app.ResultsConfig1XVarDD,'yVarDD',app.ResultsConfig1YVarDD, ...
+                    'targetDD',app.ResultsConfig1TargetDD,'compDD',app.ResultsConfig1CompDD, ...
+                    'normCheck',app.ResultsConfig1NormCheck,'scaleField',app.ResultsConfig1ScaleField, ...
+                    'axisDD',app.ResultsConfig1AxisDD);
             else
-                app.ResultsNameModeLabel.Text = 'Canonical rows shown. Enable alias rows or the aliases column to view alternate names.';
+                cfg = struct('xVarDD',app.ResultsConfig2XVarDD,'yVarDD',app.ResultsConfig2YVarDD, ...
+                    'targetDD',app.ResultsConfig2TargetDD,'compDD',app.ResultsConfig2CompDD, ...
+                    'normCheck',app.ResultsConfig2NormCheck,'scaleField',app.ResultsConfig2ScaleField, ...
+                    'axisDD',app.ResultsConfig2AxisDD);
             end
         end
 
