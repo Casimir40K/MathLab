@@ -99,6 +99,7 @@ classdef MathLabApp < handle
         ResultsLegendDD
         ResultsExportBtn
         ResultsResetBtn
+        ResultsClearChartBtn
         ResultsPlotStatusLabel
         OpenStreamTableBtn
         ResultsStabilityBtn
@@ -544,7 +545,7 @@ classdef MathLabApp < handle
         function buildResultsTab(app)
             t = uitab(app.Tabs, 'Title', ' Results ');
             app.ResultsTab = t;
-            gl = uigridlayout(t, [3 1], 'RowHeight',{180,66,'1x'}, ...
+            gl = uigridlayout(t, [3 1], 'RowHeight',{150,56,'1x'}, ...
                 'Padding',[12 12 12 12], 'RowSpacing',8);
 
             varsAll = {'iteration','residual','flow','T','P','conversion','efficiency','duty','power','y(i)', ...
@@ -552,7 +553,7 @@ classdef MathLabApp < handle
             varsY = varsAll(2:end);
             headerItems = {'Trace','X','Y','Axis','Scale','Normalize','Comp','Target'};
 
-            topG = uigridlayout(gl, [5 8], 'ColumnWidth',{'fit',120,120,80,75,85,70,'1x'}, ...
+            topG = uigridlayout(gl, [5 8], 'ColumnWidth',{'fit',115,115,72,70,72,62,'1x'}, ...
                 'RowHeight',{22,26,26,26,26}, 'Padding',[0 0 0 0], 'ColumnSpacing',7, 'RowSpacing',4);
             topG.Layout.Row = 1;
             for c = 1:numel(headerItems)
@@ -595,8 +596,8 @@ classdef MathLabApp < handle
             app.ResultsConfig4CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsConfig4TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
 
-            midG = uigridlayout(gl, [3 8], 'ColumnWidth',{'fit',140,'fit',130,'fit',120,'fit','1x'}, ...
-                'RowHeight',{26,26,26}, 'Padding',[0 0 0 0], 'ColumnSpacing',8, 'RowSpacing',4);
+            midG = uigridlayout(gl, [3 9], 'ColumnWidth',{'fit',130,'fit',120,'fit',105,'fit',95,'fit','1x'}, ...
+                'RowHeight',{24,24,24}, 'Padding',[0 0 0 0], 'ColumnSpacing',7, 'RowSpacing',4);
             midG.Layout.Row = 2;
             uilabel(midG,'Text','Preset','FontWeight','bold');
             app.ResultsPresetDD = uidropdown(midG, 'Items',{'custom','convergence diagnostics','stream trajectories','unit performance'}, ...
@@ -619,6 +620,8 @@ classdef MathLabApp < handle
             app.ResultsYScaleDropDown = uidropdown(midG, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsResetBtn = uibutton(midG, 'push', 'Text','Reset view', ...
                 'ButtonPushedFcn',@(~,~) app.resetResultsView());
+            app.ResultsClearChartBtn = uibutton(midG, 'push', 'Text','Clear chart', ...
+                'ButtonPushedFcn',@(~,~) app.clearResultsChart());
             app.ResultsExportBtn = uibutton(midG, 'push', 'Text','Export figure', ...
                 'ButtonPushedFcn',@(~,~) app.exportResultsFigure());
             app.OpenStreamTableBtn = uibutton(midG, 'push', 'Text','Open Stream Table', ...
@@ -2052,11 +2055,12 @@ classdef MathLabApp < handle
                 return;
             end
 
-            cla(app.ResultsAxes);
+            cla(app.ResultsAxes, 'reset');
             yyaxis(app.ResultsAxes,'left');
             yyaxis(app.ResultsAxes,'right');
             yyaxis(app.ResultsAxes,'left');
             hold(app.ResultsAxes,'on');
+            grid(app.ResultsAxes,'on');
             app.ResultsAxes.XScale = app.ResultsXScaleDropDown.Value;
             app.ResultsAxes.YScale = app.ResultsYScaleDropDown.Value;
 
@@ -2543,6 +2547,19 @@ classdef MathLabApp < handle
             app.setResultsTrace(4, 'iteration','power','right',1,false,'1','(none)');
             app.refreshResultsTable();
             app.stabilitySweepData = struct('param',[],'values',[],'maxRealPole',[],'stableMask',[],'warnings',strings(0,1));
+        end
+
+        function clearResultsChart(app)
+            if isempty(app.ResultsAxes) || ~isvalid(app.ResultsAxes)
+                return;
+            end
+            cla(app.ResultsAxes, 'reset');
+            grid(app.ResultsAxes,'on');
+            xlabel(app.ResultsAxes,'X');
+            ylabel(app.ResultsAxes,'Y');
+            title(app.ResultsAxes,'Iteration snapshots and solved-state metrics');
+            legend(app.ResultsAxes,'off');
+            app.ResultsPlotStatusLabel.Text = 'Chart cleared. Adjust settings or solve to replot data.';
         end
 
         function exportResultsFigure(app)
