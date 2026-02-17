@@ -310,6 +310,39 @@ classdef ProcessSolver < handle
                 T.(sprintf('y_%s', obj.streams{1}.species{j})) = Y(:,j);
             end
         end
+
+        function S = localStabilityProxy(obj)
+            %LOCALSTABILITYPROXY Estimate local poles from residual Jacobian.
+            %
+            % Interprets the steady-state residual as pseudo-dynamics:
+            %    dx/dt = -r(x)
+            % Then the linearized state matrix at the current operating
+            % point is A = -dr/dx = -J. Poles are eig(A).
+            %
+            % This is a local stability proxy for diagnostics/teaching,
+            % not a substitute for full dynamic model linearization.
+
+            [x, map] = obj.packUnknowns();
+            [r, ok] = obj.tryResiduals(x);
+            if ~ok
+                error('Cannot compute stability proxy: residual contains NaN/Inf at current state.');
+            end
+
+            J = obj.fdJacobianSafe(x, r);
+            A = -J;
+            poles = eig(A);
+
+            S = struct();
+            S.J = J;
+            S.A = A;
+            S.poles = poles;
+            S.maxReal = max(real(poles));
+            S.minReal = min(real(poles));
+            S.stable = all(real(poles) < 0);
+            S.nUnknowns = numel(x);
+            S.nEquations = numel(r);
+            S.map = map;
+        end
     end
 
     methods (Access = private)
