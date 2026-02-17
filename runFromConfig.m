@@ -56,7 +56,7 @@ function [T, solver] = runFromConfig(configFile, varargin)
     units = {};
     for i = 1:numel(resolvedDefs)
         def = resolvedDefs{i};
-        u = buildUnitFromDef(def, streams);
+        u = buildUnitFromDef(def, streams, cfg.speciesNames, units);
         if ~isempty(u)
             units{end+1} = u; %#ok
         else
@@ -83,7 +83,10 @@ function [T, solver] = runFromConfig(configFile, varargin)
     fprintf('MaxIter: %d   Tolerance: %.2e\n\n', maxIter, tolAbs);
 
     % --- Solve ---
+    autoScale = true;
+    if isfield(cfg, 'autoScale'), autoScale = cfg.autoScale; end
     solver = fs.solve('maxIter', maxIter, 'tolAbs', tolAbs, ...
+        'autoScale', autoScale, ...
         'printToConsole', opts.verbose, 'consoleStride', 1);
 
     % --- Results ---
@@ -131,7 +134,8 @@ function [T, solver] = runFromConfig(configFile, varargin)
 end
 
 % =========================================================================
-function u = buildUnitFromDef(def, streams)
+function u = buildUnitFromDef(def, streams, speciesNames, existingUnits)
+    if nargin < 4, existingUnits = {}; end
     u = [];
     switch def.type
         case 'Link'
@@ -264,9 +268,9 @@ function u = buildUnitFromDef(def, streams)
             end
         case 'Adjust'
             if isfield(def,'designSpecIndex') && isfield(def,'ownerIndex') && ...
-                    def.designSpecIndex <= numel(units) && def.ownerIndex <= numel(units)
-                ds = units{def.designSpecIndex};
-                owner = units{def.ownerIndex};
+                    def.designSpecIndex <= numel(existingUnits) && def.ownerIndex <= numel(existingUnits)
+                ds = existingUnits{def.designSpecIndex};
+                owner = existingUnits{def.ownerIndex};
                 u = proc.units.Adjust(ds, owner, def.field, def.index, def.minValue, def.maxValue);
             end
         case 'Calculator'
@@ -281,9 +285,69 @@ function u = buildUnitFromDef(def, streams)
             if ~isempty(s)
                 u = proc.units.Constraint(s, def.field, def.value, def.index);
             end
+        case 'Compressor'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                mix = buildThermoMix(speciesNames);
+                args = {};
+                if isfield(def,'Pout'), args = [args, {'Pout', def.Pout}]; end
+                if isfield(def,'PR'), args = [args, {'PR', def.PR}]; end
+                if isfield(def,'eta'), args = [args, {'eta', def.eta}]; end
+                u = proc.units.Compressor(sIn, sOut, mix, args{:});
+            end
+        case 'Turbine'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                mix = buildThermoMix(speciesNames);
+                args = {};
+                if isfield(def,'Pout'), args = [args, {'Pout', def.Pout}]; end
+                if isfield(def,'PR'), args = [args, {'PR', def.PR}]; end
+                if isfield(def,'eta'), args = [args, {'eta', def.eta}]; end
+                u = proc.units.Turbine(sIn, sOut, mix, args{:});
+            end
+        case 'Heater'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                mix = buildThermoMix(speciesNames);
+                args = {};
+                if isfield(def,'Tout'), args = [args, {'Tout', def.Tout}]; end
+                if isfield(def,'duty'), args = [args, {'duty', def.duty}]; end
+                u = proc.units.Heater(sIn, sOut, mix, args{:});
+            end
+        case 'Cooler'
+            sIn = findS(def.inlet, streams);
+            sOut = findS(def.outlet, streams);
+            if ~isempty(sIn) && ~isempty(sOut)
+                mix = buildThermoMix(speciesNames);
+                args = {};
+                if isfield(def,'Tout'), args = [args, {'Tout', def.Tout}]; end
+                if isfield(def,'duty'), args = [args, {'duty', def.duty}]; end
+                u = proc.units.Cooler(sIn, sOut, mix, args{:});
+            end
+        case 'HeatExchanger'
+            hIn = findS(def.hotInlet, streams);
+            hOut = findS(def.hotOutlet, streams);
+            cIn = findS(def.coldInlet, streams);
+            cOut = findS(def.coldOutlet, streams);
+            if ~isempty(hIn) && ~isempty(hOut) && ~isempty(cIn) && ~isempty(cOut)
+                mix = buildThermoMix(speciesNames);
+                args = {};
+                if isfield(def,'Th_out'), args = [args, {'Th_out', def.Th_out}]; end
+                if isfield(def,'Tc_out'), args = [args, {'Tc_out', def.Tc_out}]; end
+                if isfield(def,'duty'), args = [args, {'duty', def.duty}]; end
+                u = proc.units.HeatExchanger(hIn, hOut, cIn, cOut, mix, args{:});
+            end
     end
 end
 
+function mix = buildThermoMix(speciesNames)
+    %BUILDTHERMOMIX Create IdealGasMixture from species names.
+    lib = thermo.ThermoLibrary();
+    mix = thermo.IdealGasMixture(speciesNames, lib);
+end
 
 function [resolvedDefs, aliasByOutlet] = resolveIdentityLinks(unitDefs)
     aliasByOutlet = containers.Map('KeyType','char','ValueType','char');
@@ -353,6 +417,18 @@ function def = rewriteDefStreams(def, aliasByOutlet)
     if isfield(def, 'outletB')
         def.outletB = resolveAliasName(def.outletB, aliasByOutlet);
     end
+    if isfield(def, 'hotInlet')
+        def.hotInlet = resolveAliasName(def.hotInlet, aliasByOutlet);
+    end
+    if isfield(def, 'hotOutlet')
+        def.hotOutlet = resolveAliasName(def.hotOutlet, aliasByOutlet);
+    end
+    if isfield(def, 'coldInlet')
+        def.coldInlet = resolveAliasName(def.coldInlet, aliasByOutlet);
+    end
+    if isfield(def, 'coldOutlet')
+        def.coldOutlet = resolveAliasName(def.coldOutlet, aliasByOutlet);
+    end
     if isfield(def, 'inlets')
         for k = 1:numel(def.inlets)
             def.inlets{k} = resolveAliasName(def.inlets{k}, aliasByOutlet);
@@ -381,7 +457,7 @@ function addStreamAliasesToFlowsheet(fs, aliasByOutlet, streams)
 end
 
 function tf = isIdentityLinkDef(def)
-    tf = strcmp(def.type, 'Link') && ~(isfield(def, 'mode') && ~strcmp(def.mode, 'identity'));
+    tf = strcmp(def.type, 'Link') && isfield(def, 'mode') && strcmp(def.mode, 'identity');
     if isfield(def, 'isIdentity')
         tf = logical(def.isIdentity);
     end
