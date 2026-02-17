@@ -4097,7 +4097,10 @@ classdef MathLabApp < handle
                     def = cfg.unitDefs{i};
                     switch def.type
                         case 'Link'
-                            isIdentityLink = ~(isfield(def, 'mode') && ~strcmp(def.mode, 'identity'));
+                            isIdentityLink = false;
+                            if isfield(def, 'mode')
+                                isIdentityLink = strcmp(def.mode, 'identity');
+                            end
                             if isfield(def, 'isIdentity')
                                 isIdentityLink = logical(def.isIdentity);
                             end
@@ -4487,7 +4490,7 @@ classdef MathLabApp < handle
         end
 
         function tf = isIdentityLinkDef(~, def)
-            tf = strcmp(def.type, 'Link') && ~(isfield(def, 'mode') && ~strcmp(def.mode, 'identity'));
+            tf = strcmp(def.type, 'Link') && isfield(def, 'mode') && strcmp(def.mode, 'identity');
             if isfield(def, 'isIdentity')
                 tf = logical(def.isIdentity);
             end
