@@ -59,6 +59,9 @@ def1.outlet = 'S2';
 def2.type = 'Link';
 def2.inlet = 'S2';
 def2.outlet = 'S3';
+% IMPORTANT: mark as non-identity so MathLabApp keeps Link equations in DOF.
+def2.mode = 'material';
+def2.isIdentity = false;
 
 def3.type = 'Heater';
 def3.inlet = 'S3';
