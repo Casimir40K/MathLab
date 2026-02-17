@@ -118,6 +118,9 @@ classdef MathLabApp < handle
         ResultsSummaryUnitLabel
         ResultsSummaryDeltaLabel
         ResultsSummaryExportBtn
+        ResultsSummaryStreamTable
+        ResultsSummaryUnitTable
+        ResultsSummaryBottomLabel
         ResultsExportSummaryCsvBtn
         ResultsExportTracesCsvBtn
         ResultsExportSnapshotsCsvBtn
@@ -155,7 +158,15 @@ classdef MathLabApp < handle
         DutyUnitDropDown
         PowerUnitDropDown
         SaveResultsBtn
-        OpenUnitTableBtn
+        OpenDebugBtn
+
+        % -- Debug popup --
+        DebugFig
+        DebugLevelDD
+        DebugTopNField
+        DebugEveryField
+        DebugEqNamesCheck
+        DebugLogArea
 
         % -- Unit Table popup --
         UnitTableFig
@@ -192,6 +203,7 @@ classdef MathLabApp < handle
         unitPrefs struct = struct('flow','kmol/s','temperature','K','pressure','Pa','duty','kW','power','kW')
         lastExportPath char = ''
         stabilitySweepData struct = struct('param',[],'values',[],'maxRealPole',[],'stableMask',[],'warnings',strings(0,1))
+        debugSettings struct = struct('debugLevel',0,'debugTopN',10,'debugEvery',0,'debugEqNames',true)
     end
 
     % =====================================================================
@@ -299,17 +311,17 @@ classdef MathLabApp < handle
                 'BackgroundColor',[0.95 0.92 0.85], ...
                 'ButtonPushedFcn',@(~,~) app.loadConfigDialog());
 
-            % Save results + unit table row
+            % Save results + debug row
             resRow = uigridlayout(leftG, [1 2], 'ColumnWidth',{'1x','1x'}, ...
                 'Padding',[0 0 0 0]);
             app.SaveResultsBtn = uibutton(resRow,'push','Text','Save Results', ...
                 'FontWeight','bold', ...
                 'BackgroundColor',[0.85 0.92 0.95], ...
                 'ButtonPushedFcn',@(~,~) app.saveResultsToOutput());
-            app.OpenUnitTableBtn = uibutton(resRow,'push','Text','Open Unit Table', ...
+            app.OpenDebugBtn = uibutton(resRow,'push','Text','Debug Tools', ...
                 'FontWeight','bold', ...
-                'BackgroundColor',[0.90 0.88 0.98], ...
-                'ButtonPushedFcn',@(~,~) app.openUnitTablePopup());
+                'BackgroundColor',[0.95 0.88 0.88], ...
+                'ButtonPushedFcn',@(~,~) app.openDebugPopup());
 
             % Placeholder for spacing
             uilabel(leftG, 'Text', '');
@@ -554,78 +566,98 @@ classdef MathLabApp < handle
         function buildResultsSummaryTab(app)
             t = uitab(app.Tabs, 'Title', ' Results - Summary ');
             app.ResultsSummaryTab = t;
-            gl = uigridlayout(t, [3 2], 'RowHeight',{34,34,'1x'}, ...
-                'ColumnWidth',{'1x','1x'}, 'Padding',[12 12 12 12], 'RowSpacing',8, 'ColumnSpacing',8);
+            gl = uigridlayout(t, [3 1], 'RowHeight',{52,'1x',24}, ...
+                'Padding',[12 12 12 12], 'RowSpacing',8);
 
-            uilabel(gl, 'Text','Run Summary', 'FontWeight','bold', 'FontSize',14);
-            app.ResultsSummaryExportBtn = uibutton(gl, 'push', 'Text','Export Summary CSV', ...
+            % --- Top row: status banner ---
+            topG = uigridlayout(gl, [2 6], 'RowHeight',{24,24}, ...
+                'ColumnWidth',{'fit','fit','fit','fit','1x','fit'}, ...
+                'Padding',[0 0 0 0], 'ColumnSpacing',14);
+            topG.Layout.Row = 1;
+            app.ResultsSummaryStatusLabel = uilabel(topG, 'Text','Status: Not solved', ...
+                'FontWeight','bold', 'FontSize',13);
+            app.ResultsSummaryResidualLabel = uilabel(topG, 'Text','Residual: -', 'FontSize',12);
+            app.ResultsSummaryIterLabel = uilabel(topG, 'Text','Iterations: -', 'FontSize',12);
+            app.ResultsSummaryDeltaLabel = uilabel(topG, 'Text','', 'FontSize',11, 'FontColor',[0.4 0.4 0.4]);
+            uilabel(topG, 'Text','');  % spacer
+            app.ResultsSummaryExportBtn = uibutton(topG, 'push', 'Text','Export Summary CSV', ...
                 'ButtonPushedFcn',@(~,~) app.exportResultsSummaryCsv());
+            % Second header row: stream/unit counts
+            app.ResultsSummaryStreamLabel = uilabel(topG, 'Text','Streams: -', 'FontSize',11, 'FontColor',[0.3 0.3 0.3]);
+            app.ResultsSummaryStreamLabel.Layout.Row = 2; app.ResultsSummaryStreamLabel.Layout.Column = 1;
+            app.ResultsSummaryUnitLabel = uilabel(topG, 'Text','Units: -', 'FontSize',11, 'FontColor',[0.3 0.3 0.3]);
+            app.ResultsSummaryUnitLabel.Layout.Row = 2; app.ResultsSummaryUnitLabel.Layout.Column = 2;
 
-            app.ResultsSummaryStatusLabel = uilabel(gl, 'Text','Status: Not solved');
-            app.ResultsSummaryResidualLabel = uilabel(gl, 'Text','Final residual: -');
-            app.ResultsSummaryIterLabel = uilabel(gl, 'Text','Iterations: -');
-            app.ResultsSummaryDeltaLabel = uilabel(gl, 'Text','Delta vs previous run: -');
+            % --- Middle: stream table + unit table side by side ---
+            midG = uigridlayout(gl, [2 2], 'RowHeight',{24,'1x'}, 'ColumnWidth',{'1x','1x'}, ...
+                'Padding',[0 0 0 0], 'ColumnSpacing',10, 'RowSpacing',4);
+            midG.Layout.Row = 2;
+            uilabel(midG, 'Text','Stream Summary', 'FontWeight','bold', 'FontSize',12);
+            uilabel(midG, 'Text','Unit Summary', 'FontWeight','bold', 'FontSize',12);
+            app.ResultsSummaryStreamTable = uitable(midG, 'ColumnEditable',false);
+            app.ResultsSummaryStreamTable.Layout.Row = 2; app.ResultsSummaryStreamTable.Layout.Column = 1;
+            app.ResultsSummaryUnitTable = uitable(midG, 'ColumnEditable',false);
+            app.ResultsSummaryUnitTable.Layout.Row = 2; app.ResultsSummaryUnitTable.Layout.Column = 2;
 
-            app.ResultsSummaryStreamLabel = uilabel(gl, 'Text','Key stream: -', 'WordWrap','on');
-            app.ResultsSummaryStreamLabel.Layout.Row = 3;
-            app.ResultsSummaryStreamLabel.Layout.Column = 1;
-            app.ResultsSummaryUnitLabel = uilabel(gl, 'Text','Key unit: -', 'WordWrap','on');
-            app.ResultsSummaryUnitLabel.Layout.Row = 3;
-            app.ResultsSummaryUnitLabel.Layout.Column = 2;
+            % --- Bottom: status ---
+            app.ResultsSummaryBottomLabel = uilabel(gl, 'Text','Run solve to populate summary.', ...
+                'FontColor',[0.35 0.35 0.35]);
+            app.ResultsSummaryBottomLabel.Layout.Row = 3;
+
             app.refreshResultsSummaryPanel();
         end
 
         function buildResultsTab(app)
             t = uitab(app.Tabs, 'Title', ' Results - Trends ');
             app.ResultsTab = t;
-            gl = uigridlayout(t, [1 2], 'ColumnWidth',{440,'1x'}, ...
-                'Padding',[12 12 12 12], 'ColumnSpacing',10);
+            gl = uigridlayout(t, [1 2], 'ColumnWidth',{380,'1x'}, ...
+                'Padding',[10 10 10 10], 'ColumnSpacing',8);
 
             ctrlP = uipanel(gl, 'Title','Trend Controls', 'FontWeight','bold');
             ctrlP.Layout.Column = 1;
             cg = uigridlayout(ctrlP, [8 1], ...
-                'RowHeight',{140,140,140,140,28,28,28,'1x'}, ...
-                'Padding',[8 8 8 8], 'RowSpacing',6);
+                'RowHeight',{80,80,80,80,28,28,28,'1x'}, ...
+                'Padding',[6 6 6 6], 'RowSpacing',4);
 
             app.buildTraceRow(cg, 1, 'flow', 'left');
             app.buildTraceRow(cg, 2, 'T', 'right');
             app.buildTraceRow(cg, 3, 'residual', 'left');
             app.buildTraceRow(cg, 4, 'power', 'right');
 
-            row5 = uigridlayout(cg,[1 6],'ColumnWidth',{'fit',130,'fit',120,'fit','1x'},'Padding',[0 0 0 0]);
+            row5 = uigridlayout(cg,[1 6],'ColumnWidth',{'fit',130,'fit',110,'fit','1x'},'Padding',[0 0 0 0]);
             uilabel(row5,'Text','Preset','FontWeight','bold');
-            app.ResultsPresetDD = uidropdown(row5, 'Items',{'custom','convergence diagnostics','stream trajectories','unit performance'}, 'Value','custom');
+            app.ResultsPresetDD = uidropdown(row5, 'Items',{'custom','convergence','stream profiles','unit performance'}, 'Value','custom');
             app.ResultsApplyPresetBtn = uibutton(row5, 'push', 'Text','Apply', 'ButtonPushedFcn',@(~,~) app.applyResultsPreset());
-            uilabel(row5,'Text','Smoothing','FontWeight','bold');
+            uilabel(row5,'Text','Smooth','FontWeight','bold');
             app.ResultsSmoothingDD = uidropdown(row5, 'Items',{'none','moving-average','median'}, 'Value','none', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsSmoothWindowField = uieditfield(row5, 'numeric', 'Value',3, 'Limits',[1 999], 'RoundFractionalValues','on', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
 
-            row6 = uigridlayout(cg,[1 8],'ColumnWidth',{'fit',90,'fit',90,'fit',100,'fit','1x'},'Padding',[0 0 0 0]);
+            row6 = uigridlayout(cg,[1 8],'ColumnWidth',{'fit',85,'fit',85,'fit',80,'fit','1x'},'Padding',[0 0 0 0]);
             uilabel(row6,'Text','Norm','FontWeight','bold');
             app.ResultsNormModeDD = uidropdown(row6, 'Items',{'absolute','normalized'}, 'Value','absolute', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             uilabel(row6,'Text','Legend','FontWeight','bold');
             app.ResultsLegendDD = uidropdown(row6, 'Items',{'best','northeast','northwest','southeast','southwest','off'}, 'Value','best', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            uilabel(row6,'Text','X/Y scale','FontWeight','bold');
-            scales = uigridlayout(row6,[1 2],'ColumnWidth',{80,80},'Padding',[0 0 0 0]);
+            uilabel(row6,'Text','Scale','FontWeight','bold');
+            scales = uigridlayout(row6,[1 2],'ColumnWidth',{70,70},'Padding',[0 0 0 0]);
             app.ResultsXScaleDropDown = uidropdown(scales, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsYScaleDropDown = uidropdown(scales, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             uilabel(row6,'Text','');
-            app.ResultsPlotStatusLabel = uilabel(row6, 'Text','Run solve to populate iteration snapshots.', 'FontColor',[0.35 0.35 0.35]);
+            app.ResultsPlotStatusLabel = uilabel(row6, 'Text','Run solve to see iteration trends.', 'FontColor',[0.35 0.35 0.35]);
 
-            row7 = uigridlayout(cg,[1 4],'ColumnWidth',{110,110,110,'1x'},'Padding',[0 0 0 0]);
-            app.ResultsResetBtn = uibutton(row7, 'push', 'Text','Reset view', 'ButtonPushedFcn',@(~,~) app.resetResultsView());
-            app.ResultsClearChartBtn = uibutton(row7, 'push', 'Text','Clear chart', 'ButtonPushedFcn',@(~,~) app.clearResultsChart());
-            app.ResultsExportBtn = uibutton(row7, 'push', 'Text','Export figure', 'ButtonPushedFcn',@(~,~) app.exportResultsFigure());
+            row7 = uigridlayout(cg,[1 4],'ColumnWidth',{100,100,100,'1x'},'Padding',[0 0 0 0]);
+            app.ResultsResetBtn = uibutton(row7, 'push', 'Text','Reset', 'ButtonPushedFcn',@(~,~) app.resetResultsView());
+            app.ResultsClearChartBtn = uibutton(row7, 'push', 'Text','Clear', 'ButtonPushedFcn',@(~,~) app.clearResultsChart());
+            app.ResultsExportBtn = uibutton(row7, 'push', 'Text','Export', 'ButtonPushedFcn',@(~,~) app.exportResultsFigure());
             uilabel(row7,'Text','');
 
-            axP = uipanel(gl, 'Title','Results Trends', 'FontWeight','bold');
+            axP = uipanel(gl, 'Title','Convergence & Solved-State Trends', 'FontWeight','bold');
             axP.Layout.Column = 2;
             axG = uigridlayout(axP,[1 1],'Padding',[4 4 4 4]);
             app.ResultsAxes = uiaxes(axG);
             grid(app.ResultsAxes,'on');
-            xlabel(app.ResultsAxes,'X');
-            ylabel(app.ResultsAxes,'Y');
-            title(app.ResultsAxes,'Iteration snapshots and solved-state metrics');
+            xlabel(app.ResultsAxes,'Iteration');
+            ylabel(app.ResultsAxes,'Value');
+            title(app.ResultsAxes,'Solve to see iteration trends');
 
             app.resetResultsView();
             app.refreshResultsTargetOptions();
@@ -634,43 +666,22 @@ classdef MathLabApp < handle
         function buildTraceRow(app, parent, idx, yDefault, axisDefault)
             varsAll = {'iteration','residual','flow','T','P','conversion','efficiency','duty','power','y(i)','deltaT_hx','power_specific','conversion_profile'};
             varsY = varsAll(2:end);
+            traceColors = {[0.00 0.45 0.74],[0.85 0.33 0.10],[0.47 0.67 0.19],[0.49 0.18 0.56]};
             p = uipanel(parent, 'Title', sprintf('Trace %d', idx));
-            g = uigridlayout(p,[2 8],'ColumnWidth',{'fit',95,95,60,54,58,52,'1x'},'RowHeight',{24,24},'Padding',[6 6 6 6]);
-            uilabel(g,'Text','X'); uilabel(g,'Text','Y'); uilabel(g,'Text','Axis'); uilabel(g,'Text','Scale'); uilabel(g,'Text','Norm'); uilabel(g,'Text','Comp'); uilabel(g,'Text','Target'); uilabel(g,'Text','');
-            switch idx
-                case 1
-                    app.ResultsConfig1XVarDD = uidropdown(g, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig1YVarDD = uidropdown(g, 'Items',varsY, 'Value',yDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig1AxisDD = uidropdown(g, 'Items',{'left','right'}, 'Value',axisDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig1ScaleField = uieditfield(g, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig1NormCheck = uicheckbox(g, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig1CompDD = uidropdown(g, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig1TargetDD = uidropdown(g, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                case 2
-                    app.ResultsConfig2XVarDD = uidropdown(g, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig2YVarDD = uidropdown(g, 'Items',varsY, 'Value',yDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig2AxisDD = uidropdown(g, 'Items',{'left','right'}, 'Value',axisDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig2ScaleField = uieditfield(g, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig2NormCheck = uicheckbox(g, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig2CompDD = uidropdown(g, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig2TargetDD = uidropdown(g, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                case 3
-                    app.ResultsConfig3XVarDD = uidropdown(g, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig3YVarDD = uidropdown(g, 'Items',varsY, 'Value',yDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig3AxisDD = uidropdown(g, 'Items',{'left','right'}, 'Value',axisDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig3ScaleField = uieditfield(g, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig3NormCheck = uicheckbox(g, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig3CompDD = uidropdown(g, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig3TargetDD = uidropdown(g, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                otherwise
-                    app.ResultsConfig4XVarDD = uidropdown(g, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig4YVarDD = uidropdown(g, 'Items',varsY, 'Value',yDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig4AxisDD = uidropdown(g, 'Items',{'left','right'}, 'Value',axisDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig4ScaleField = uieditfield(g, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig4NormCheck = uicheckbox(g, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig4CompDD = uidropdown(g, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-                    app.ResultsConfig4TargetDD = uidropdown(g, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            end
+            g = uigridlayout(p,[2 6],'ColumnWidth',{'fit',90,'fit',90,50,'1x'},'RowHeight',{24,24},'Padding',[4 4 4 4],'RowSpacing',2);
+            uilabel(g,'Text','Y','FontWeight','bold','FontColor',traceColors{idx});
+            app.(['ResultsConfig' num2str(idx) 'YVarDD']) = uidropdown(g, 'Items',varsY, 'Value',yDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            uilabel(g,'Text','Axis','FontWeight','bold');
+            app.(['ResultsConfig' num2str(idx) 'AxisDD']) = uidropdown(g, 'Items',{'left','right'}, 'Value',axisDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.(['ResultsConfig' num2str(idx) 'NormCheck']) = uicheckbox(g, 'Text','Norm', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.(['ResultsConfig' num2str(idx) 'ScaleField']) = uieditfield(g, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            uilabel(g,'Text','Target','FontWeight','bold');
+            app.(['ResultsConfig' num2str(idx) 'TargetDD']) = uidropdown(g, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            uilabel(g,'Text','Comp','FontWeight','bold');
+            app.(['ResultsConfig' num2str(idx) 'CompDD']) = uidropdown(g, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            % X var is always iteration for simplicity, store as hidden dropdown
+            app.(['ResultsConfig' num2str(idx) 'XVarDD']) = uidropdown(g, 'Items',varsAll, 'Value','iteration', 'Visible','off');
+            uilabel(g,'Text','');
         end
 
         function buildResultsTablesTab(app)
@@ -701,23 +712,23 @@ classdef MathLabApp < handle
             app.ResultsStabilitySweepMaxField = uieditfield(sweepRangeG, 'numeric', 'Value',0.9);
             app.ResultsStabilitySweepPtsField = uieditfield(sweepRangeG, 'numeric', 'Value',11, 'Limits',[2 200], 'RoundFractionalValues','on');
             app.ResultsStabilitySweepPtsField.Layout.Column = 3;
-            app.ResultsStabilityBtn = uibutton(gl, 'push', 'Text','Run Nyquist + Sweep', ...
+            app.ResultsStabilityBtn = uibutton(gl, 'push', 'Text','Run Stability Analysis', ...
                 'FontWeight','bold', 'BackgroundColor',[0.93 0.88 0.99], 'ButtonPushedFcn',@(~,~) app.updateStabilityAnalysisTab());
             app.ResultsStabilityBtn.Layout.Column = [1 2];
-            app.ResultsStabilityStatusLabel = uilabel(gl, 'Text','Run solve then run Nyquist + sweep.', 'FontColor',[0.35 0.35 0.35]);
+            app.ResultsStabilityStatusLabel = uilabel(gl, 'Text','Run solve first, then run stability analysis.', 'FontColor',[0.35 0.35 0.35]);
             app.ResultsStabilityStatusLabel.Layout.Column = [3 4];
 
-            p1 = uipanel(gl, 'Title','Nyquist (proxy from local linearization A)', 'FontWeight','bold');
+            p1 = uipanel(gl, 'Title','Nyquist Diagram (Characteristic Loci via Laplace Transform)', 'FontWeight','bold');
             p1.Layout.Row = 3; p1.Layout.Column = [1 2];
             g1 = uigridlayout(p1,[1 1],'Padding',[4 4 4 4]);
             app.ResultsNyquistAxes = uiaxes(g1);
-            grid(app.ResultsNyquistAxes,'on'); xlabel(app.ResultsNyquistAxes,'Re(G(j\omega))'); ylabel(app.ResultsNyquistAxes,'Im(G(j\omega))');
+            grid(app.ResultsNyquistAxes,'on'); xlabel(app.ResultsNyquistAxes,'Re'); ylabel(app.ResultsNyquistAxes,'Im');
 
-            p2 = uipanel(gl, 'Title','Stability sweep (max real pole)', 'FontWeight','bold');
+            p2 = uipanel(gl, 'Title','Pole Map & Stability Sweep', 'FontWeight','bold');
             p2.Layout.Row = 3; p2.Layout.Column = [3 4];
             g2 = uigridlayout(p2,[1 1],'Padding',[4 4 4 4]);
             app.ResultsStabilitySweepAxes = uiaxes(g2);
-            grid(app.ResultsStabilitySweepAxes,'on'); xlabel(app.ResultsStabilitySweepAxes,'Parameter'); ylabel(app.ResultsStabilitySweepAxes,'max Re(pole)');
+            grid(app.ResultsStabilitySweepAxes,'on'); xlabel(app.ResultsStabilitySweepAxes,'Re(pole)'); ylabel(app.ResultsStabilitySweepAxes,'Im(pole)');
         end
 
         function buildResultsExportTab(app)
@@ -2114,9 +2125,15 @@ classdef MathLabApp < handle
             end
 
             try
+                dbg = app.debugSettings;
                 solver = fs.solve('maxIter',maxIt,'tolAbs',tol, ...
                     'autoScale',true, ...
-                    'printToConsole',false,'iterCallback',@iterCb);
+                    'printToConsole', false, ...
+                    'debugLevel', dbg.debugLevel, ...
+                    'debugTopN', dbg.debugTopN, ...
+                    'debugEvery', dbg.debugEvery, ...
+                    'debugEqNames', dbg.debugEqNames, ...
+                    'iterCallback',@iterCb);
                 app.lastSolver = solver;
 
                 % Final plot cleanup
@@ -2355,15 +2372,20 @@ classdef MathLabApp < handle
                 y = y ./ y0;
             end
             y = y .* cfg.scaleField.Value;
+            traceColors = {[0.00 0.45 0.74],[0.85 0.33 0.10],[0.47 0.67 0.19],[0.49 0.18 0.56]};
             yyaxis(app.ResultsAxes, cfg.axisDD.Value);
+            tgtShort = cfg.targetDD.Value;
+            if startsWith(tgtShort,'Stream: '), tgtShort = extractAfter(tgtShort,'Stream: '); end
+            if startsWith(tgtShort,'Unit: '), tgtShort = extractAfter(tgtShort,'Unit: '); end
             plot(app.ResultsAxes, x, y, '-', 'LineWidth',1.5, ...
-                'DisplayName', sprintf('Plot %d: %s vs %s @ %s', idx, cfg.yVarDD.Value, cfg.xVarDD.Value, cfg.targetDD.Value));
+                'Color', traceColors{idx}, ...
+                'DisplayName', sprintf('%s @ %s', cfg.yVarDD.Value, tgtShort));
             if strcmp(cfg.axisDD.Value,'left')
-                ylabel(app.ResultsAxes,'Left axis');
+                ylabel(app.ResultsAxes, cfg.yVarDD.Value);
             else
-                ylabel(app.ResultsAxes,'Right axis');
+                ylabel(app.ResultsAxes, cfg.yVarDD.Value);
             end
-            xlabel(app.ResultsAxes, 'Configured X variable');
+            xlabel(app.ResultsAxes, cfg.xVarDD.Value);
             ok = true;
         end
 
@@ -2575,33 +2597,48 @@ classdef MathLabApp < handle
         end
 
         function applyResultsPreset(app)
+            % Find first available stream and unit targets
+            app.refreshResultsTargetOptions();
+            targets = app.ResultsConfig1TargetDD.Items;
+            firstStream = '(none)';
+            firstUnit = '(none)';
+            for i = 1:numel(targets)
+                if startsWith(targets{i}, 'Stream: ') && strcmp(firstStream,'(none)')
+                    firstStream = targets{i};
+                end
+                if startsWith(targets{i}, 'Unit: ') && strcmp(firstUnit,'(none)')
+                    firstUnit = targets{i};
+                end
+            end
+
             switch app.ResultsPresetDD.Value
-                case 'convergence diagnostics'
+                case 'convergence'
                     app.setResultsTrace(1, 'iteration','residual','left',1,false,'1','(none)');
-                    app.setResultsTrace(2, 'iteration','flow','right',1,true,'1','Stream: Feed');
-                    app.setResultsTrace(3, 'iteration','T','left',1,false,'1','Stream: Feed');
-                    app.setResultsTrace(4, 'iteration','P','right',1,false,'1','Stream: Feed');
-                    app.ResultsSmoothingDD.Value = 'moving-average';
-                    app.ResultsSmoothWindowField.Value = 5;
-                case 'stream trajectories'
-                    app.setResultsTrace(1, 'flow','T','left',1,false,'1','Stream: Feed');
-                    app.setResultsTrace(2, 'flow','P','right',1,false,'1','Stream: Feed');
-                    app.setResultsTrace(3, 'flow','y(i)','left',1,false,'1','Stream: Feed');
-                    app.setResultsTrace(4, 'flow','conversion_profile','right',1,false,'1','Stream: Feed');
+                    app.setResultsTrace(2, 'iteration','flow','right',1,true,'1',firstStream);
+                    app.setResultsTrace(3, 'iteration','T','left',1,false,'1',firstStream);
+                    app.setResultsTrace(4, 'iteration','P','right',1,false,'1',firstStream);
                     app.ResultsSmoothingDD.Value = 'none';
                     app.ResultsSmoothWindowField.Value = 3;
-                case 'unit performance'
-                    app.setResultsTrace(1, 'iteration','duty','left',1,false,'1','(none)');
-                    app.setResultsTrace(2, 'iteration','power','right',1,false,'1','(none)');
-                    app.setResultsTrace(3, 'iteration','deltaT_hx','left',1,false,'1','(none)');
-                    app.setResultsTrace(4, 'iteration','power_specific','right',1,false,'1','(none)');
-                    app.ResultsSmoothingDD.Value = 'moving-average';
+                    app.ResultsYScaleDropDown.Value = 'log';
+                case 'stream profiles'
+                    app.setResultsTrace(1, 'iteration','flow','left',1,false,'1',firstStream);
+                    app.setResultsTrace(2, 'iteration','T','right',1,false,'1',firstStream);
+                    app.setResultsTrace(3, 'iteration','P','left',1,false,'1',firstStream);
+                    app.setResultsTrace(4, 'iteration','y(i)','right',1,false,'1',firstStream);
+                    app.ResultsSmoothingDD.Value = 'none';
                     app.ResultsSmoothWindowField.Value = 3;
+                    app.ResultsYScaleDropDown.Value = 'linear';
+                case 'unit performance'
+                    app.setResultsTrace(1, 'iteration','duty','left',1,false,'1',firstUnit);
+                    app.setResultsTrace(2, 'iteration','power','right',1,false,'1',firstUnit);
+                    app.setResultsTrace(3, 'iteration','conversion','left',1,false,'1',firstUnit);
+                    app.setResultsTrace(4, 'iteration','efficiency','right',1,false,'1',firstUnit);
+                    app.ResultsSmoothingDD.Value = 'none';
+                    app.ResultsSmoothWindowField.Value = 3;
+                    app.ResultsYScaleDropDown.Value = 'linear';
             end
-            app.refreshResultsTargetOptions();
             app.autofillResultTargets();
             app.refreshResultsTable();
-            app.stabilitySweepData = struct('param',[],'values',[],'maxRealPole',[],'stableMask',[],'warnings',strings(0,1));
         end
 
         function setResultsTrace(app, idx, xVar, yVar, axisName, scaleVal, normVal, compVal, targetVal)
@@ -2713,20 +2750,113 @@ classdef MathLabApp < handle
                 return;
             end
             s = app.resultsSummary;
+
+            % --- Header labels ---
+            statusColor = [0.6 0.1 0.1];
+            if strcmp(s.status, 'Converged'), statusColor = [0.1 0.5 0.1]; end
             app.ResultsSummaryStatusLabel.Text = sprintf('Status: %s', s.status);
+            app.ResultsSummaryStatusLabel.FontColor = statusColor;
             if isfinite(s.residual)
-                app.ResultsSummaryResidualLabel.Text = sprintf('Final residual: %.3e', s.residual);
+                app.ResultsSummaryResidualLabel.Text = sprintf('Residual: %.3e', s.residual);
             else
-                app.ResultsSummaryResidualLabel.Text = 'Final residual: -';
+                app.ResultsSummaryResidualLabel.Text = 'Residual: -';
             end
             app.ResultsSummaryIterLabel.Text = sprintf('Iterations: %d', s.iterations);
             app.ResultsSummaryDeltaLabel.Text = s.deltaText;
+
+            % --- Stream summary table ---
+            nStreams = 0; nUnits = 0;
+            if ~isempty(app.ResultsSummaryStreamTable) && isvalid(app.ResultsSummaryStreamTable)
+                Ts = app.buildSummaryStreamTable();
+                app.ResultsSummaryStreamTable.Data = Ts;
+                app.ResultsSummaryStreamTable.ColumnName = Ts.Properties.VariableNames;
+                nStreams = height(Ts);
+            end
+
+            % --- Unit summary table ---
+            if ~isempty(app.ResultsSummaryUnitTable) && isvalid(app.ResultsSummaryUnitTable)
+                Tu = app.buildSummaryUnitTable();
+                app.ResultsSummaryUnitTable.Data = Tu;
+                app.ResultsSummaryUnitTable.ColumnName = Tu.Properties.VariableNames;
+                nUnits = height(Tu);
+            end
+
             if ~isempty(app.ResultsSummaryStreamLabel) && isvalid(app.ResultsSummaryStreamLabel)
-                app.ResultsSummaryStreamLabel.Text = sprintf('Key stream: %s', s.streamText);
+                app.ResultsSummaryStreamLabel.Text = sprintf('Streams: %d', nStreams);
             end
             if ~isempty(app.ResultsSummaryUnitLabel) && isvalid(app.ResultsSummaryUnitLabel)
-                app.ResultsSummaryUnitLabel.Text = sprintf('Key unit: %s', s.unitText);
+                app.ResultsSummaryUnitLabel.Text = sprintf('Units: %d', nUnits);
             end
+
+            % Bottom status
+            if ~isempty(app.ResultsSummaryBottomLabel) && isvalid(app.ResultsSummaryBottomLabel)
+                if isempty(app.lastSolver)
+                    app.ResultsSummaryBottomLabel.Text = 'Run solve to populate summary.';
+                else
+                    app.ResultsSummaryBottomLabel.Text = sprintf('Summary refreshed | %d streams, %d units', nStreams, nUnits);
+                end
+            end
+        end
+
+        function T = buildSummaryStreamTable(app)
+            cols = {'Name','Flow','T','P'};
+            fs = app.lastFlowsheet;
+            if isempty(fs) || isempty(fs.streamDisplayNames)
+                T = cell2table(cell(0,numel(cols)), 'VariableNames', cols);
+                return;
+            end
+            n = numel(fs.streamDisplayNames);
+            data = cell(n, numel(cols));
+            flowUnit = app.unitLabel('flow','');
+            tempUnit = app.unitLabel('temperature','');
+            pressUnit = app.unitLabel('pressure','');
+            cols = {sprintf('Name'), sprintf('Flow (%s)', flowUnit), sprintf('T (%s)', tempUnit), sprintf('P (%s)', pressUnit)};
+            for i = 1:n
+                nm = char(string(fs.streamDisplayNames{i}));
+                sref = fs.streamDisplayRefs{i};
+                data{i,1} = nm;
+                data{i,2} = app.formatSpecValue(app.fromSI(sref.n_dot, 'flow'));
+                data{i,3} = app.formatSpecValue(app.fromSI(sref.T, 'temperature'));
+                data{i,4} = app.formatSpecValue(app.fromSI(sref.P, 'pressure'));
+            end
+            T = cell2table(data, 'VariableNames', cols);
+        end
+
+        function T = buildSummaryUnitTable(app)
+            cols = {'Unit','Type','Key Metric','Value'};
+            fs = app.lastFlowsheet;
+            if isempty(fs) || isempty(fs.units)
+                if ~isempty(app.units)
+                    n = numel(app.units);
+                    data = cell(n, numel(cols));
+                    for i = 1:n
+                        data{i,1} = sprintf('U%d', i);
+                        data{i,2} = app.shortTypeName(app.units{i});
+                        data{i,3} = '-';
+                        data{i,4} = '-';
+                    end
+                    T = cell2table(data, 'VariableNames', cols);
+                else
+                    T = cell2table(cell(0,numel(cols)), 'VariableNames', cols);
+                end
+                return;
+            end
+            n = numel(fs.units);
+            data = cell(n, numel(cols));
+            for i = 1:n
+                u = fs.units{i};
+                data{i,1} = sprintf('U%d', i);
+                data{i,2} = app.shortTypeName(u);
+                pairs = app.unitObjectResultPairs(u);
+                if ~isempty(pairs)
+                    data{i,3} = pairs{1,1};
+                    data{i,4} = pairs{1,2};
+                else
+                    data{i,3} = '-';
+                    data{i,4} = '-';
+                end
+            end
+            T = cell2table(data, 'VariableNames', cols);
         end
 
         function exportResultsSummaryCsv(app)
@@ -2841,46 +2971,123 @@ classdef MathLabApp < handle
                 st = app.lastSolver.localStabilityProxy();
                 A = st.A;
                 n = size(A,1);
-                w = logspace(-3, 3, 260);
-                G = nan(numel(w),1);
-                I = eye(n);
-                for k = 1:numel(w)
-                    M = (1i*w(k))*I - A;
-                    G(k) = trace(M\I) / max(1,n);
+                poles = st.poles;
+
+                % --- Nyquist via Characteristic Loci (Generalised Nyquist) ---
+                % Laplace transform of the linearised system dx/dt = Ax gives
+                % the resolvent L(s) = (sI - A)^{-1}.  The generalised
+                % Nyquist criterion plots the eigenvalues of L(jw) as w
+                % sweeps from -inf to +inf.  Encirclements of the origin by
+                % any locus indicate instability.
+                nW = 400;
+                w = logspace(-4, 4, nW);
+                I_n = eye(n);
+                % nLoci x nW matrix of characteristic loci
+                lociEig = nan(n, nW);
+                for k = 1:nW
+                    Ljw = (1i*w(k)*I_n - A) \ I_n;
+                    lociEig(:,k) = eig(Ljw);
+                end
+                % Sort loci for continuity: at each freq step, match
+                % eigenvalues to previous step by nearest distance
+                for k = 2:nW
+                    prev = lociEig(:,k-1);
+                    curr = lociEig(:,k);
+                    used = false(n,1);
+                    order = zeros(n,1);
+                    for j = 1:n
+                        dists = abs(curr - prev(j));
+                        dists(used) = inf;
+                        [~, best] = min(dists);
+                        order(j) = best;
+                        used(best) = true;
+                    end
+                    lociEig(:,k) = curr(order);
                 end
 
+                % --- Left plot: Nyquist characteristic loci ---
                 if ~isempty(app.ResultsNyquistAxes) && isvalid(app.ResultsNyquistAxes)
                     cla(app.ResultsNyquistAxes, 'reset');
                     hold(app.ResultsNyquistAxes,'on');
-                    plot(app.ResultsNyquistAxes, real(G), imag(G), 'LineWidth',1.5, 'DisplayName','+\omega');
-                    plot(app.ResultsNyquistAxes, real(conj(flipud(G))), imag(conj(flipud(G))), '--', 'LineWidth',1.2, 'DisplayName','-\omega');
-                    plot(app.ResultsNyquistAxes, -1, 0, 'rx', 'MarkerSize',8, 'LineWidth',1.6, 'DisplayName','-1+0j');
+                    colors = lines(min(n, 12));
+                    nShow = min(n, 12);  % cap visible loci for readability
+                    for j = 1:nShow
+                        lj = lociEig(j,:);
+                        % positive frequency
+                        plot(app.ResultsNyquistAxes, real(lj), imag(lj), ...
+                            '-', 'LineWidth',1.4, 'Color',colors(j,:), ...
+                            'DisplayName', sprintf('\\lambda_{%d}(+\\omega)', j));
+                        % negative frequency (conjugate mirror)
+                        plot(app.ResultsNyquistAxes, real(lj), -imag(lj), ...
+                            '--', 'LineWidth',1.0, 'Color',colors(j,:), ...
+                            'HandleVisibility','off');
+                    end
+                    % Critical point and origin
+                    plot(app.ResultsNyquistAxes, 0, 0, 'ko', 'MarkerSize',7, 'LineWidth',1.5, 'DisplayName','Origin');
+                    plot(app.ResultsNyquistAxes, -1, 0, 'rx', 'MarkerSize',9, 'LineWidth',1.8, 'DisplayName','-1+0j');
+                    % Unit circle for reference
+                    th = linspace(0,2*pi,100);
+                    plot(app.ResultsNyquistAxes, cos(th), sin(th), ':', 'Color',[0.7 0.7 0.7], 'HandleVisibility','off');
                     grid(app.ResultsNyquistAxes,'on');
-                    xlabel(app.ResultsNyquistAxes,'Re(G(j\omega))');
-                    ylabel(app.ResultsNyquistAxes,'Im(G(j\omega))');
-                    legend(app.ResultsNyquistAxes,'Location','best');
-                    title(app.ResultsNyquistAxes, sprintf('Proxy Nyquist | max Re(pole)=%.3e', st.maxReal));
+                    xlabel(app.ResultsNyquistAxes,'Re(\lambda)');
+                    ylabel(app.ResultsNyquistAxes,'Im(\lambda)');
+                    if nShow <= 6
+                        legend(app.ResultsNyquistAxes,'Location','best');
+                    else
+                        legend(app.ResultsNyquistAxes,'off');
+                    end
+                    stableTxt = app.ternary(st.stable, 'STABLE', 'UNSTABLE');
+                    title(app.ResultsNyquistAxes, sprintf('Generalised Nyquist | %s | max Re(pole)=%.3e', stableTxt, st.maxReal));
                     hold(app.ResultsNyquistAxes,'off');
                 end
 
-                sweepData = app.collectStabilitySweep();
+                % --- Right plot: Pole map (and sweep if configured) ---
+                sweepData = app.runStabilitySweepIfRequested();
                 if ~isempty(app.ResultsStabilitySweepAxes) && isvalid(app.ResultsStabilitySweepAxes)
                     cla(app.ResultsStabilitySweepAxes, 'reset');
-                    grid(app.ResultsStabilitySweepAxes,'on');
+                    hold(app.ResultsStabilitySweepAxes,'on');
+
                     if ~isempty(sweepData.values)
-                        plot(app.ResultsStabilitySweepAxes, sweepData.values, sweepData.maxRealPole, '-o', 'LineWidth',1.4);
-                        yline(app.ResultsStabilitySweepAxes, 0, '--r', 'HandleVisibility','off');
+                        % Stability sweep mode: max Re(pole) vs parameter
+                        plot(app.ResultsStabilitySweepAxes, sweepData.values, sweepData.maxRealPole, '-o', ...
+                            'LineWidth',1.4, 'Color',[0.85 0.33 0.10], 'MarkerSize',5, ...
+                            'DisplayName','max Re(pole)');
+                        yline(app.ResultsStabilitySweepAxes, 0, '--r', 'LineWidth',1.0, 'HandleVisibility','off');
+                        xlabel(app.ResultsStabilitySweepAxes, sprintf('Sweep: %s', sweepData.param));
+                        ylabel(app.ResultsStabilitySweepAxes, 'max Re(pole)');
+                        title(app.ResultsStabilitySweepAxes, 'Stability Sweep');
+                        legend(app.ResultsStabilitySweepAxes,'Location','best');
                     else
-                        text(app.ResultsStabilitySweepAxes, 0.05, 0.5, 'No sweep configured', 'Units','normalized');
+                        % Pole map of current operating point
+                        stableIdx = real(poles) < 0;
+                        if any(stableIdx)
+                            plot(app.ResultsStabilitySweepAxes, real(poles(stableIdx)), imag(poles(stableIdx)), ...
+                                'bx', 'MarkerSize',8, 'LineWidth',1.5, 'DisplayName','Stable poles');
+                        end
+                        if any(~stableIdx)
+                            plot(app.ResultsStabilitySweepAxes, real(poles(~stableIdx)), imag(poles(~stableIdx)), ...
+                                'rx', 'MarkerSize',10, 'LineWidth',2.0, 'DisplayName','Unstable poles');
+                        end
+                        xline(app.ResultsStabilitySweepAxes, 0, '--', 'Color',[0.5 0.5 0.5], 'HandleVisibility','off');
+                        yline(app.ResultsStabilitySweepAxes, 0, '--', 'Color',[0.5 0.5 0.5], 'HandleVisibility','off');
+                        xlabel(app.ResultsStabilitySweepAxes, 'Re(pole)');
+                        ylabel(app.ResultsStabilitySweepAxes, 'Im(pole)');
+                        title(app.ResultsStabilitySweepAxes, sprintf('Pole Map (%d poles, %d stable)', n, sum(stableIdx)));
+                        legend(app.ResultsStabilitySweepAxes,'Location','best');
                     end
-                    xlabel(app.ResultsStabilitySweepAxes, 'Sweep parameter');
-                    ylabel(app.ResultsStabilitySweepAxes, 'max Re(pole)');
+                    grid(app.ResultsStabilitySweepAxes,'on');
+                    hold(app.ResultsStabilitySweepAxes,'off');
                 end
 
                 app.stabilitySweepData = sweepData;
-                stableTxt = ternary(st.stable, 'stable', 'unstable');
+                stableTxt = app.ternary(st.stable, 'stable', 'unstable');
+                nStable = sum(real(poles) < 0);
+                statusParts = {sprintf('System is %s (max Re=%.3e). %d/%d poles stable.', stableTxt, st.maxReal, nStable, n)};
+                if ~isempty(sweepData.values)
+                    statusParts{end+1} = sprintf(' Sweep: %d pts.', numel(sweepData.values));
+                end
                 if ~isempty(app.ResultsStabilityStatusLabel) && isvalid(app.ResultsStabilityStatusLabel)
-                    app.ResultsStabilityStatusLabel.Text = sprintf('Nyquist refreshed. Local system is %s (max Re=%.3e).', stableTxt, st.maxReal);
+                    app.ResultsStabilityStatusLabel.Text = strjoin(statusParts, '');
                 end
             catch ME
                 if ~isempty(app.ResultsStabilityStatusLabel) && isvalid(app.ResultsStabilityStatusLabel)
@@ -2889,7 +3096,7 @@ classdef MathLabApp < handle
             end
         end
 
-        function txt = ternary(~, cond, a, b)
+        function txt = ternary(~, cond, a, b) %#ok<INUSL>
             if cond, txt = a; else, txt = b; end
         end
 
@@ -2941,11 +3148,11 @@ classdef MathLabApp < handle
             end
             cla(app.ResultsAxes, 'reset');
             grid(app.ResultsAxes,'on');
-            xlabel(app.ResultsAxes,'X');
-            ylabel(app.ResultsAxes,'Y');
-            title(app.ResultsAxes,'Iteration snapshots and solved-state metrics');
+            xlabel(app.ResultsAxes,'Iteration');
+            ylabel(app.ResultsAxes,'Value');
+            title(app.ResultsAxes,'Solve to see iteration trends');
             legend(app.ResultsAxes,'off');
-            app.ResultsPlotStatusLabel.Text = 'Chart cleared. Adjust settings or solve to replot data.';
+            app.ResultsPlotStatusLabel.Text = 'Chart cleared. Configure traces and solve to plot.';
         end
 
         function exportResultsFigure(app)
@@ -2968,6 +3175,239 @@ classdef MathLabApp < handle
 
     end
 
+
+    % =====================================================================
+    %  DEBUG TOOLS POPUP
+    % =====================================================================
+    methods (Access = private)
+        function openDebugPopup(app)
+            if ~isempty(app.DebugFig) && isvalid(app.DebugFig)
+                app.DebugFig.Visible = 'on';
+                return;
+            end
+
+            app.DebugFig = uifigure('Name','MathLab — Debug Tools', ...
+                'Position',[150 120 620 520], 'Color',[0.97 0.97 0.98]);
+            app.DebugFig.CloseRequestFcn = @(src,~) app.onDebugPopupClosed(src);
+
+            gl = uigridlayout(app.DebugFig, [4 1], ...
+                'RowHeight',{28, 'fit', 'fit', '1x'}, 'Padding',[10 10 10 10], 'RowSpacing',8);
+
+            uilabel(gl, 'Text','Debug & Diagnostics', 'FontWeight','bold', 'FontSize',14);
+
+            % --- Solver debug settings ---
+            solverP = uipanel(gl, 'Title','Solver Debug Settings', 'FontWeight','bold');
+            sg = uigridlayout(solverP, [4 4], 'ColumnWidth',{'fit','1x','fit','1x'}, ...
+                'RowHeight',{28,28,28,28}, 'Padding',[8 8 8 8], 'RowSpacing',4, 'ColumnSpacing',8);
+
+            uilabel(sg,'Text','Debug level:','FontWeight','bold');
+            app.DebugLevelDD = uidropdown(sg, 'Items',{'0 — off','1 — summary','2 — top residuals','3 — periodic'}, 'Value','0 — off');
+            uilabel(sg,'Text','Top N equations:','FontWeight','bold');
+            app.DebugTopNField = uieditfield(sg, 'numeric', 'Value',10, 'Limits',[1 100], 'RoundFractionalValues','on');
+
+            uilabel(sg,'Text','Print every N iters:','FontWeight','bold');
+            app.DebugEveryField = uieditfield(sg, 'numeric', 'Value',0, 'Limits',[0 10000], 'RoundFractionalValues','on');
+            uilabel(sg,'Text','Show eq. labels:','FontWeight','bold');
+            app.DebugEqNamesCheck = uicheckbox(sg, 'Text','', 'Value',true);
+
+            uilabel(sg,'Text','');
+            uilabel(sg,'Text','');
+            uilabel(sg,'Text','');
+            applyBtn = uibutton(sg, 'push', 'Text','Apply to Next Solve', ...
+                'FontWeight','bold', 'BackgroundColor',[0.88 0.93 0.85], ...
+                'ButtonPushedFcn',@(~,~) app.applyDebugSettings());
+
+            % --- Diagnostic actions ---
+            actionsP = uipanel(gl, 'Title','Diagnostic Actions', 'FontWeight','bold');
+            ag = uigridlayout(actionsP, [2 3], 'ColumnWidth',{'1x','1x','1x'}, ...
+                'RowHeight',{30,30}, 'Padding',[8 8 8 8], 'RowSpacing',4, 'ColumnSpacing',8);
+
+            uibutton(ag, 'push', 'Text','Show Jacobian Sparsity', ...
+                'ButtonPushedFcn',@(~,~) app.debugShowJacobianSparsity());
+            uibutton(ag, 'push', 'Text','Show Worst Residuals', ...
+                'ButtonPushedFcn',@(~,~) app.debugShowWorstResiduals());
+            uibutton(ag, 'push', 'Text','Show DOF Analysis', ...
+                'ButtonPushedFcn',@(~,~) app.debugShowDOF());
+            uibutton(ag, 'push', 'Text','Dump Solver State', ...
+                'ButtonPushedFcn',@(~,~) app.debugDumpSolverState());
+            uibutton(ag, 'push', 'Text','Show Pole Summary', ...
+                'ButtonPushedFcn',@(~,~) app.debugShowPoles());
+            uibutton(ag, 'push', 'Text','Open Unit Table', ...
+                'ButtonPushedFcn',@(~,~) app.openUnitTablePopup());
+
+            % --- Log area ---
+            app.DebugLogArea = uitextarea(gl, 'Editable','off', ...
+                'FontName','Consolas', 'FontSize',11, ...
+                'Value',{'Debug output will appear here.'; ''; 'Use the actions above or apply debug settings before solving.'});
+        end
+
+        function onDebugPopupClosed(app, src)
+            if ~isempty(src) && isvalid(src)
+                delete(src);
+            end
+            app.DebugFig = [];
+        end
+
+        function applyDebugSettings(app)
+            levelStr = app.DebugLevelDD.Value;
+            level = str2double(levelStr(1));
+            topN = round(app.DebugTopNField.Value);
+            every = round(app.DebugEveryField.Value);
+            eqNames = app.DebugEqNamesCheck.Value;
+
+            % Store for next solve
+            app.debugSettings = struct('debugLevel',level,'debugTopN',topN, ...
+                'debugEvery',every,'debugEqNames',eqNames);
+
+            msg = sprintf('Debug settings applied: level=%d, topN=%d, every=%d, eqNames=%s', ...
+                level, topN, every, app.ternary(eqNames, 'on', 'off'));
+            app.appendDebugLog(msg);
+        end
+
+        function appendDebugLog(app, msg)
+            if isempty(app.DebugLogArea) || ~isvalid(app.DebugLogArea)
+                return;
+            end
+            vals = app.DebugLogArea.Value;
+            if ischar(vals), vals = {vals}; end
+            ts = datestr(now, 'HH:MM:SS');
+            vals{end+1} = sprintf('[%s] %s', ts, msg);
+            if numel(vals) > 100
+                vals = vals(end-99:end);
+            end
+            app.DebugLogArea.Value = vals;
+        end
+
+        function debugShowJacobianSparsity(app)
+            if isempty(app.lastSolver)
+                app.appendDebugLog('No solver available. Run solve first.');
+                return;
+            end
+            try
+                st = app.lastSolver.localStabilityProxy();
+                J = st.J;
+                nz = nnz(abs(J) > 1e-15);
+                tot = numel(J);
+                density = nz / max(1,tot) * 100;
+                app.appendDebugLog(sprintf('Jacobian: %dx%d, %d non-zero (%.1f%% density)', ...
+                    size(J,1), size(J,2), nz, density));
+                app.appendDebugLog(sprintf('  Condition number: %.3e', cond(J)));
+                app.appendDebugLog(sprintf('  Rank: %d / %d', rank(J), min(size(J))));
+            catch ME
+                app.appendDebugLog(sprintf('Jacobian analysis failed: %s', ME.message));
+            end
+        end
+
+        function debugShowWorstResiduals(app)
+            if isempty(app.lastSolver)
+                app.appendDebugLog('No solver available. Run solve first.');
+                return;
+            end
+            try
+                sv = app.lastSolver;
+                app.appendDebugLog(sprintf('--- Residual Summary ---'));
+                app.appendDebugLog(sprintf('  Final residual: %.4e', sv.finalResidual));
+                if ~isempty(sv.residualHistory)
+                    rh = sv.residualHistory(isfinite(sv.residualHistory));
+                    app.appendDebugLog(sprintf('  Residual history: %d points', numel(rh)));
+                    app.appendDebugLog(sprintf('  Initial: %.4e | Final: %.4e', rh(1), rh(end)));
+                    if numel(rh) >= 2
+                        ratio = rh(end) / max(rh(1), eps);
+                        app.appendDebugLog(sprintf('  Reduction ratio: %.4e', ratio));
+                    end
+                end
+                if ~isempty(sv.weightedResidualHistory)
+                    wrh = sv.weightedResidualHistory(isfinite(sv.weightedResidualHistory));
+                    if ~isempty(wrh)
+                        app.appendDebugLog(sprintf('  Final weighted residual: %.4e', wrh(end)));
+                    end
+                end
+            catch ME
+                app.appendDebugLog(sprintf('Residual analysis failed: %s', ME.message));
+            end
+        end
+
+        function debugShowDOF(app)
+            try
+                fs = app.buildFlowsheet();
+                [nEq, nUnk, dof] = fs.checkDOF();
+                app.appendDebugLog(sprintf('DOF Analysis: %d equations, %d unknowns, DOF=%d', nEq, nUnk, dof));
+                if dof == 0
+                    app.appendDebugLog('  System is exactly determined.');
+                elseif dof > 0
+                    app.appendDebugLog(sprintf('  Under-specified by %d (need more specs).', dof));
+                else
+                    app.appendDebugLog(sprintf('  Over-specified by %d (too many specs).', abs(dof)));
+                end
+            catch ME
+                app.appendDebugLog(sprintf('DOF analysis failed: %s', ME.message));
+            end
+        end
+
+        function debugDumpSolverState(app)
+            if isempty(app.lastSolver)
+                app.appendDebugLog('No solver available. Run solve first.');
+                return;
+            end
+            try
+                sv = app.lastSolver;
+                app.appendDebugLog('--- Solver State Dump ---');
+                app.appendDebugLog(sprintf('  Converged: %s', app.ternary(sv.converged,'yes','no')));
+                app.appendDebugLog(sprintf('  Exit flag: %s', sv.exitFlag));
+                app.appendDebugLog(sprintf('  Final residual: %.4e', sv.finalResidual));
+                app.appendDebugLog(sprintf('  Iterations: %d', numel(sv.residualHistory)-1));
+                try
+                    st = sv.localStabilityProxy();
+                    app.appendDebugLog(sprintf('  Unknowns: %d', st.nUnknowns));
+                    app.appendDebugLog(sprintf('  Equations: %d', st.nEquations));
+                catch
+                    app.appendDebugLog('  Unknowns/Equations: unavailable');
+                end
+                if ~isempty(sv.residualHistory)
+                    app.appendDebugLog(sprintf('  Residual range: [%.3e, %.3e]', ...
+                        min(sv.residualHistory(isfinite(sv.residualHistory))), ...
+                        max(sv.residualHistory(isfinite(sv.residualHistory)))));
+                end
+                % Save full dump to output
+                outDir = fullfile(pwd, 'output');
+                if ~exist(outDir, 'dir'), mkdir(outDir); end
+                stamp = datestr(now, 'yyyymmdd_HHMMSS');
+                outFile = fullfile(outDir, sprintf('debug_dump_%s.mat', stamp));
+                solver = app.lastSolver; %#ok<PROPLC>
+                save(outFile, 'solver');
+                app.appendDebugLog(sprintf('  Full dump saved: %s', outFile));
+            catch ME
+                app.appendDebugLog(sprintf('Dump failed: %s', ME.message));
+            end
+        end
+
+        function debugShowPoles(app)
+            if isempty(app.lastSolver)
+                app.appendDebugLog('No solver available. Run solve first.');
+                return;
+            end
+            try
+                st = app.lastSolver.localStabilityProxy();
+                poles = st.poles;
+                nStable = sum(real(poles) < 0);
+                nUnstable = sum(real(poles) >= 0);
+                app.appendDebugLog(sprintf('--- Pole Summary (%d total) ---', numel(poles)));
+                app.appendDebugLog(sprintf('  Stable: %d | Unstable: %d', nStable, nUnstable));
+                app.appendDebugLog(sprintf('  Max Re(pole): %.4e', st.maxReal));
+                app.appendDebugLog(sprintf('  Min Re(pole): %.4e', st.minReal));
+                % Show 5 most unstable
+                [~, idx] = sort(real(poles), 'descend');
+                topN = min(5, numel(poles));
+                app.appendDebugLog(sprintf('  Top %d most unstable:', topN));
+                for i = 1:topN
+                    p = poles(idx(i));
+                    app.appendDebugLog(sprintf('    %+.4e %+.4ej', real(p), imag(p)));
+                end
+            catch ME
+                app.appendDebugLog(sprintf('Pole analysis failed: %s', ME.message));
+            end
+        end
+    end
 
     % =====================================================================
     %  UNIT TABLE POPUP
