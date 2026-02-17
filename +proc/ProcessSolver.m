@@ -1143,6 +1143,27 @@ classdef ProcessSolver < handle
                 return
             end
 
+            % Composition logits can appear disconnected at initialization
+            % when the associated stream flow starts near zero. In that
+            % regime component-flow equations are numerically flat in y,
+            % but the DOF is still physically connected once n_dot lifts.
+            keep = true(size(dead));
+            for i = 1:numel(dead)
+                k = dead(i);
+                m = obj.map(k);
+                if strcmp(m.var, 'a') && obj.isNearZeroFlowStream(m.streamIndex)
+                    keep(i) = false;
+                    obj.log(['Jacobian dead-column candidate ignored: x(%d) %s ' ...
+                        '(near-zero stream flow n_dot=%.3e).'], ...
+                        k, obj.describeUnknown(m), obj.streams{m.streamIndex}.n_dot);
+                end
+            end
+
+            dead = dead(keep);
+            if isempty(dead)
+                return
+            end
+
             msgLines = strings(numel(dead),1);
             for i = 1:numel(dead)
                 k = dead(i);
@@ -1158,6 +1179,20 @@ classdef ProcessSolver < handle
             else
                 warning('%s Unknown(s): %s', msg, strjoin(cellstr(msgLines), '; '));
             end
+        end
+
+        function tf = isNearZeroFlowStream(obj, streamIndex)
+            tf = false;
+            if ~isfinite(streamIndex) || streamIndex < 1 || streamIndex > numel(obj.streams)
+                return
+            end
+
+            s = obj.streams{streamIndex};
+            if ~isprop(s, 'n_dot') || ~isfinite(s.n_dot)
+                return
+            end
+
+            tf = abs(s.n_dot) <= max(1e3 * obj.nDotMin, 1e-9);
         end
 
         function txt = describeUnknown(~, m)
