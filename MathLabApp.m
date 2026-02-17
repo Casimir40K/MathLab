@@ -101,6 +101,11 @@ classdef MathLabApp < handle
         ResultsResetBtn
         ResultsPlotStatusLabel
         OpenStreamTableBtn
+        ResultsStabilityBtn
+        ResultsStabilitySweepParamDD
+        ResultsStabilitySweepMinField
+        ResultsStabilitySweepMaxField
+        ResultsStabilitySweepPtsField
 
         % -- Tab 6: Sensitivity --
         SensTab
@@ -159,6 +164,7 @@ classdef MathLabApp < handle
         projectTitle char = 'MathLab_Project'
         unitPrefs struct = struct('flow','kmol/s','temperature','K','pressure','Pa','duty','kW','power','kW')
         lastExportPath char = ''
+        stabilitySweepData struct = struct('param',[],'values',[],'maxRealPole',[],'stableMask',[],'warnings',strings(0,1))
     end
 
     % =====================================================================
@@ -589,8 +595,8 @@ classdef MathLabApp < handle
             app.ResultsConfig4CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsConfig4TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
 
-            midG = uigridlayout(gl, [2 8], 'ColumnWidth',{'fit',140,'fit',130,'fit',120,'fit','1x'}, ...
-                'Padding',[0 0 0 0], 'ColumnSpacing',8, 'RowSpacing',4);
+            midG = uigridlayout(gl, [3 8], 'ColumnWidth',{'fit',140,'fit',130,'fit',120,'fit','1x'}, ...
+                'RowHeight',{26,26,26}, 'Padding',[0 0 0 0], 'ColumnSpacing',8, 'RowSpacing',4);
             midG.Layout.Row = 2;
             uilabel(midG,'Text','Preset','FontWeight','bold');
             app.ResultsPresetDD = uidropdown(midG, 'Items',{'custom','convergence diagnostics','stream trajectories','unit performance'}, ...
@@ -618,8 +624,24 @@ classdef MathLabApp < handle
             app.OpenStreamTableBtn = uibutton(midG, 'push', 'Text','Open Stream Table', ...
                 'FontWeight','bold', 'BackgroundColor',[0.88 0.93 0.99], ...
                 'ButtonPushedFcn',@(~,~) app.openStreamTablePopup());
+            app.ResultsStabilityBtn = uibutton(midG, 'push', 'Text','Update Stability', ...
+                'FontWeight','bold', 'BackgroundColor',[0.93 0.88 0.99], ...
+                'ButtonPushedFcn',@(~,~) app.updateStabilityOverlay());
             app.ResultsPlotStatusLabel = uilabel(midG, 'Text','Run solve to populate iteration snapshots.', 'FontColor',[0.35 0.35 0.35]);
-            uilabel(midG, 'Text','');
+
+            uilabel(midG,'Text','Stability sweep','FontWeight','bold');
+            app.ResultsStabilitySweepParamDD = uidropdown(midG, ...
+                'Items',{'none','Reactor conversion','Purge beta','Separator phi(1)'}, 'Value','none');
+            uilabel(midG,'Text','min/max/pts','FontWeight','bold');
+            sweepRangeG = uigridlayout(midG,[1 3], 'ColumnWidth',{'1x','1x',54}, 'Padding',[0 0 0 0]);
+            app.ResultsStabilitySweepMinField = uieditfield(sweepRangeG, 'numeric', 'Value',0.1);
+            app.ResultsStabilitySweepMaxField = uieditfield(sweepRangeG, 'numeric', 'Value',0.9);
+            app.ResultsStabilitySweepPtsField = uieditfield(sweepRangeG, 'numeric', 'Value',11, 'Limits',[2 200], 'RoundFractionalValues','on');
+            app.ResultsStabilitySweepPtsField.Layout.Column = 3;
+            uilabel(midG,'Text','');
+            uilabel(midG,'Text','');
+            uilabel(midG,'Text','');
+            uilabel(midG,'Text','');
 
             axP = uipanel(gl, 'Title','Results Trends', 'FontWeight','bold');
             axP.Layout.Row = 3;
@@ -2000,6 +2022,7 @@ classdef MathLabApp < handle
                 app.captureResultsSnapshot(numel(solver.residualHistory)-1, solver.residualHistory(end));
 
                 app.refreshResultsTable();
+                app.updateStabilityOverlay();
 
                 app.refreshStreamTables();
                 app.setStatus('Solve completed.');
@@ -2046,6 +2069,137 @@ classdef MathLabApp < handle
             end
             hold(app.ResultsAxes,'off');
             app.refreshResultsTargetOptions();
+        end
+
+
+        function updateStabilityOverlay(app)
+            if isempty(app.ResultsAxes) || ~isvalid(app.ResultsAxes)
+                return;
+            end
+            if isempty(app.lastSolver)
+                return;
+            end
+
+            holdState = ishold(app.ResultsAxes);
+            hold(app.ResultsAxes, 'on');
+            cleanupObj = onCleanup(@() app.restoreHoldState(app.ResultsAxes, holdState)); %#ok<NASGU>
+
+            try
+                st = app.lastSolver.localStabilityProxy();
+                poles = st.poles(:);
+                if isempty(poles)
+                    return;
+                end
+
+                yyaxis(app.ResultsAxes, 'right');
+                plot(app.ResultsAxes, imag(poles), real(poles), 'x', ...
+                    'Color',[0.55 0.15 0.65], 'LineWidth',1.3, ...
+                    'DisplayName','Stability poles (local)');
+                xline(app.ResultsAxes, 0, ':', 'Color',[0.5 0.5 0.5], 'HandleVisibility','off');
+                yline(app.ResultsAxes, 0, ':', 'Color',[0.5 0.5 0.5], 'HandleVisibility','off');
+                ylabel(app.ResultsAxes, 'Right axis / Real(pole)');
+                xlabel(app.ResultsAxes, 'Configured X variable / Imag(pole)');
+
+                stabText = 'stable';
+                if ~st.stable
+                    stabText = 'unstable';
+                end
+
+                sweepData = app.runStabilitySweepIfRequested();
+                if ~isempty(sweepData.values)
+                    yyaxis(app.ResultsAxes, 'left');
+                    xVals = sweepData.values(:);
+                    yVals = sweepData.maxRealPole(:);
+                    plot(app.ResultsAxes, xVals, yVals, '-s', 'LineWidth',1.4, ...
+                        'Color',[0.85 0.33 0.10], 'MarkerSize',4, ...
+                        'DisplayName', sprintf('Max Re(pole) sweep: %s', sweepData.param));
+                    yline(app.ResultsAxes, 0, '--', 'Color',[0.85 0.33 0.10], 'HandleVisibility','off');
+                    app.stabilitySweepData = sweepData;
+                    app.ResultsPlotStatusLabel.Text = sprintf('Local poles: max Re=%.3e (%s). Sweep points: %d.', ...
+                        st.maxReal, stabText, numel(sweepData.values));
+                else
+                    app.ResultsPlotStatusLabel.Text = sprintf('Local poles: max Re=%.3e (%s).', st.maxReal, stabText);
+                end
+            catch ME
+                app.ResultsPlotStatusLabel.Text = sprintf('Stability overlay unavailable: %s', ME.message);
+            end
+        end
+
+        function sweepData = runStabilitySweepIfRequested(app)
+            sweepData = struct('param',[],'values',[],'maxRealPole',[],'stableMask',[],'warnings',strings(0,1));
+            if isempty(app.ResultsStabilitySweepParamDD) || strcmp(app.ResultsStabilitySweepParamDD.Value, 'none')
+                return;
+            end
+            if isempty(app.lastFlowsheet)
+                return;
+            end
+
+            paramChoice = app.ResultsStabilitySweepParamDD.Value;
+            vMin = app.ResultsStabilitySweepMinField.Value;
+            vMax = app.ResultsStabilitySweepMaxField.Value;
+            nPts = round(app.ResultsStabilitySweepPtsField.Value);
+            vals = linspace(vMin, vMax, nPts);
+
+            [unitIdx, unitLabel] = app.pickStabilitySweepTarget(paramChoice);
+            if isempty(unitIdx)
+                sweepData.warnings(end+1) = "No compatible unit for selected stability sweep.";
+                return;
+            end
+
+            origVal = app.getSensParamValue(paramChoice, unitIdx, unitLabel);
+            maxReal = nan(1, nPts);
+            stableMask = false(1, nPts);
+
+            for i = 1:nPts
+                try
+                    app.applySensParam(paramChoice, unitIdx, vals(i), unitLabel);
+                    fs = app.buildFlowsheet();
+                    solver = fs.solve('maxIter', app.MaxIterField.Value, 'tolAbs', app.TolField.Value, ...
+                        'autoScale', true, 'printToConsole', false);
+                    st = solver.localStabilityProxy();
+                    maxReal(i) = st.maxReal;
+                    stableMask(i) = st.stable;
+                catch
+                    maxReal(i) = NaN;
+                    stableMask(i) = false;
+                end
+            end
+
+            if ~isnan(origVal)
+                app.applySensParam(paramChoice, unitIdx, origVal, unitLabel);
+            end
+
+            sweepData.param = sprintf('%s @ %s', paramChoice, unitLabel);
+            sweepData.values = vals;
+            sweepData.maxRealPole = maxReal;
+            sweepData.stableMask = stableMask;
+        end
+
+        function [unitIdx, unitLabel] = pickStabilitySweepTarget(app, paramChoice)
+            unitIdx = [];
+            unitLabel = '(none)';
+            for i = 1:numel(app.units)
+                u = app.units{i};
+                if contains(paramChoice, 'conversion') && isprop(u, 'conversion')
+                    unitIdx = i;
+                elseif contains(paramChoice, 'beta') && isprop(u, 'beta')
+                    unitIdx = i;
+                elseif contains(paramChoice, 'phi') && isprop(u, 'phi')
+                    unitIdx = i;
+                else
+                    continue;
+                end
+                unitLabel = sprintf('[%d] %s', i, app.shortTypeName(u));
+                return;
+            end
+        end
+
+        function restoreHoldState(~, ax, holdState)
+            if holdState
+                hold(ax, 'on');
+            else
+                hold(ax, 'off');
+            end
         end
 
         function ok = plotResultsConfig(app, idx)
@@ -2324,6 +2478,7 @@ classdef MathLabApp < handle
             app.refreshResultsTargetOptions();
             app.autofillResultTargets();
             app.refreshResultsTable();
+            app.stabilitySweepData = struct('param',[],'values',[],'maxRealPole',[],'stableMask',[],'warnings',strings(0,1));
         end
 
         function setResultsTrace(app, idx, xVar, yVar, axisName, scaleVal, normVal, compVal, targetVal)
@@ -2378,6 +2533,7 @@ classdef MathLabApp < handle
             app.setResultsTrace(3, 'iteration','residual','left',1,false,'1','(none)');
             app.setResultsTrace(4, 'iteration','power','right',1,false,'1','(none)');
             app.refreshResultsTable();
+            app.stabilitySweepData = struct('param',[],'values',[],'maxRealPole',[],'stableMask',[],'warnings',strings(0,1));
         end
 
         function exportResultsFigure(app)

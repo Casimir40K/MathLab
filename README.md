@@ -80,6 +80,11 @@ Set max iterations and tolerance, then click **Solve**. The tab shows:
 
 Complete stream table with all solved values: names, n_dot, T, P, and mole fractions.
 
+You can also run a **local stability diagnostic** from this tab:
+- **Update Stability** computes a local Jacobian-based pole proxy (`dx/dt = -r(x)`), then overlays pole locations (imaginary vs real parts) on the results axes.
+- Stability is summarized using `max(Re(pole))`: negative implies locally stable; positive implies locally unstable.
+- Optional **stability sweep** lets you vary a key unit parameter (`conversion`, `beta`, or `phi`) and plot `max(Re(pole))` vs that parameter to see how stability margin shifts.
+
 ### 6. Sensitivity
 
 Sweep any unit parameter or stream property across a range and see how an output changes:
