@@ -23,15 +23,15 @@ cfg.projectTitle = 'Square DOF Thermo Recycle';
 streamDefs = {
 % name  n_dot       T       P      y                                  kn_n  kn_T  kn_P  kn_y
   'S1', 10.0,       300.0,  1e5, [0.80 0.20 0.00],                    true, true, true, true;
-  'S2', 7.00008,    300.0,  1e5, [0.85713287 0.14285548 1.1650897e-05], false,false,false,false;
+  'S2', 12.0,       300.0,  1e5, [0.75 0.20 0.05],                    false,false,false,false;
   'S3', 12.0,       300.0,  1e5, [0.75 0.20 0.05],                    false,false,false,false;
-  'S4', 2.00001,    500.0,  1e5, [0.99999299 9.8057565e-13 7.0051635e-06], false,false,false,false;
-  'S5', 6.62051e-05,278.15, 1e5, [9.9947768e-07 9.9453556e-07 0.99999801], false,false,false,false;
-  'S6', 1.12798e-07,278.15, 1e5, [1 1e-12 1e-12],                     false,false,false,false;
-  'S7', 3.99959e-09,278.15, 1e5, [1 1e-12 1e-12],                     false,false,false,false;
-  'Sp', 2.19131e-05,278.15, 1e5, [1 1e-12 1e-12],                     false,false,false,false;
-  'Sh', 4.0,        500.0,  1e5, [1 1e-12 1e-12],                     false,false,false,false;
-  'Sc', 5.33275e-06,278.15, 1e5, [1e-12 1e-12 1],                     false,false,false,false;
+  'S4', 12.0,       500.0,  1e5, [0.60 0.10 0.30],                    false,false,false,false;
+  'S5', 3.0,        278.15, 1e5, [1e-6 1e-6 0.999998],                false,false,false,false;
+  'S6', 2.0,        278.15, 1e5, [0.80 0.20 1e-6],                    false,false,false,false;
+  'S7', 2.0,        278.15, 1e5, [0.80 0.20 1e-6],                    false,false,false,false;
+  'Sp', 0.2,        278.15, 1e5, [0.80 0.20 1e-6],                    false,false,false,false;
+  'Sh', 12.0,       500.0,  1e5, [0.75 0.20 0.05],                    false,false,false,false;
+  'Sc', 12.0,       278.15, 1e5, [0.60 0.10 0.30],                    false,false,false,false;
 };
 
 for i = 1:size(streamDefs,1)
