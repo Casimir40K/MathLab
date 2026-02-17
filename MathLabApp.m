@@ -3773,6 +3773,7 @@ classdef MathLabApp < handle
             % Restore units from definitions
             app.units = {};
             app.unitDefs = {};
+            skippedUnits = strings(0,1);
             if isfield(cfg, 'unitDefs') && ~isempty(cfg.unitDefs)
                 for i = 1:numel(cfg.unitDefs)
                     def = cfg.unitDefs{i};
@@ -3780,8 +3781,21 @@ classdef MathLabApp < handle
                     if ~isempty(u)
                         app.units{end+1} = u;
                         app.unitDefs{end+1} = def;
+                    else
+                        dType = "<unknown>";
+                        if isstruct(def) && isfield(def,'type')
+                            dType = string(def.type);
+                        end
+                        skippedUnits(end+1,1) = sprintf('#%d %s', i, dType); %#ok<AGROW>
                     end
                 end
+            end
+
+            if ~isempty(skippedUnits)
+                warnMsg = sprintf('Loaded %d/%d units. Skipped unit defs: %s', ...
+                    numel(app.units), numel(cfg.unitDefs), strjoin(cellstr(skippedUnits), ', '));
+                warning('%s', warnMsg);
+                app.setStatus(warnMsg);
             end
 
             % Restore solver settings
