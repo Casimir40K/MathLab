@@ -60,6 +60,10 @@ classdef MathLabApp < handle
 
         % -- Tab 5: Results --
         ResultsTab
+        ResultsSummaryTab
+        ResultsTablesTab
+        ResultsStabilityTab
+        ResultsExportTab
         ResultsAxes
         ResultsXScaleDropDown
         ResultsYScaleDropDown
@@ -107,6 +111,18 @@ classdef MathLabApp < handle
         ResultsStabilitySweepMinField
         ResultsStabilitySweepMaxField
         ResultsStabilitySweepPtsField
+        ResultsSummaryStatusLabel
+        ResultsSummaryResidualLabel
+        ResultsSummaryIterLabel
+        ResultsSummaryStreamLabel
+        ResultsSummaryUnitLabel
+        ResultsSummaryDeltaLabel
+        ResultsSummaryExportBtn
+        ResultsExportSummaryCsvBtn
+        ResultsExportTracesCsvBtn
+        ResultsExportSnapshotsCsvBtn
+        ResultsExportStreamCsvBtn
+        ResultsExportUnitCsvBtn
 
         % -- Tab 6: Sensitivity --
         SensTab
@@ -162,6 +178,8 @@ classdef MathLabApp < handle
         resultsSnapshots cell = {}
         resultsSnapshotIters double = []
         resultsSnapshotResiduals double = []
+        resultsSummary struct = struct('status','Not solved','residual',NaN,'iterations',0, ...
+            'streamKey','-','unitKey','-','streamText','-','unitText','-','deltaText','-')
         projectTitle char = 'MathLab_Project'
         unitPrefs struct = struct('flow','kmol/s','temperature','K','pressure','Pa','duty','kW','power','kW')
         lastExportPath char = ''
@@ -210,7 +228,11 @@ classdef MathLabApp < handle
             app.buildStreamsTab();
             app.buildUnitsTab();
             app.buildSolveTab();
+            app.buildResultsSummaryTab();
             app.buildResultsTab();
+            app.buildResultsTablesTab();
+            app.buildResultsStabilityTab();
+            app.buildResultsExportTab();
             app.buildSensitivityTab();
         end
 
@@ -521,8 +543,32 @@ classdef MathLabApp < handle
         % ================================================================
         %  TAB 5: RESULTS
         % ================================================================
+        function buildResultsSummaryTab(app)
+            t = uitab(app.Tabs, 'Title', ' Results - Summary ');
+            app.ResultsSummaryTab = t;
+            gl = uigridlayout(t, [3 2], 'RowHeight',{34,34,'1x'}, ...
+                'ColumnWidth',{'1x','1x'}, 'Padding',[12 12 12 12], 'RowSpacing',8, 'ColumnSpacing',8);
+
+            uilabel(gl, 'Text','Run Summary', 'FontWeight','bold', 'FontSize',14);
+            app.ResultsSummaryExportBtn = uibutton(gl, 'push', 'Text','Export Summary CSV', ...
+                'ButtonPushedFcn',@(~,~) app.exportResultsSummaryCsv());
+
+            app.ResultsSummaryStatusLabel = uilabel(gl, 'Text','Status: Not solved');
+            app.ResultsSummaryResidualLabel = uilabel(gl, 'Text','Final residual: -');
+            app.ResultsSummaryIterLabel = uilabel(gl, 'Text','Iterations: -');
+            app.ResultsSummaryDeltaLabel = uilabel(gl, 'Text','Delta vs previous run: -');
+
+            app.ResultsSummaryStreamLabel = uilabel(gl, 'Text','Key stream: -', 'WordWrap','on');
+            app.ResultsSummaryStreamLabel.Layout.Row = 3;
+            app.ResultsSummaryStreamLabel.Layout.Column = 1;
+            app.ResultsSummaryUnitLabel = uilabel(gl, 'Text','Key unit: -', 'WordWrap','on');
+            app.ResultsSummaryUnitLabel.Layout.Row = 3;
+            app.ResultsSummaryUnitLabel.Layout.Column = 2;
+            app.refreshResultsSummaryPanel();
+        end
+
         function buildResultsTab(app)
-            t = uitab(app.Tabs, 'Title', ' Results ');
+            t = uitab(app.Tabs, 'Title', ' Results - Trends ');
             app.ResultsTab = t;
             gl = uigridlayout(t, [3 1], 'RowHeight',{150,56,'1x'}, ...
                 'Padding',[12 12 12 12], 'RowSpacing',8);
@@ -575,8 +621,8 @@ classdef MathLabApp < handle
             app.ResultsConfig4CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsConfig4TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
 
-            midG = uigridlayout(gl, [3 9], 'ColumnWidth',{'fit',130,'fit',120,'fit',105,'fit',95,'fit','1x'}, ...
-                'RowHeight',{24,24,24}, 'Padding',[0 0 0 0], 'ColumnSpacing',7, 'RowSpacing',4);
+            midG = uigridlayout(gl, [2 9], 'ColumnWidth',{'fit',130,'fit',120,'fit',105,'fit',95,'fit','1x'}, ...
+                'RowHeight',{24,24}, 'Padding',[0 0 0 0], 'ColumnSpacing',7, 'RowSpacing',4);
             midG.Layout.Row = 2;
             uilabel(midG,'Text','Preset','FontWeight','bold');
             app.ResultsPresetDD = uidropdown(midG, 'Items',{'custom','convergence diagnostics','stream trajectories','unit performance'}, ...
@@ -603,27 +649,7 @@ classdef MathLabApp < handle
                 'ButtonPushedFcn',@(~,~) app.clearResultsChart());
             app.ResultsExportBtn = uibutton(midG, 'push', 'Text','Export figure', ...
                 'ButtonPushedFcn',@(~,~) app.exportResultsFigure());
-            app.OpenStreamTableBtn = uibutton(midG, 'push', 'Text','Open Stream Table', ...
-                'FontWeight','bold', 'BackgroundColor',[0.88 0.93 0.99], ...
-                'ButtonPushedFcn',@(~,~) app.openStreamTablePopup());
-            app.ResultsStabilityBtn = uibutton(midG, 'push', 'Text','Update Stability', ...
-                'FontWeight','bold', 'BackgroundColor',[0.93 0.88 0.99], ...
-                'ButtonPushedFcn',@(~,~) app.updateStabilityOverlay());
             app.ResultsPlotStatusLabel = uilabel(midG, 'Text','Run solve to populate iteration snapshots.', 'FontColor',[0.35 0.35 0.35]);
-
-            uilabel(midG,'Text','Stability sweep','FontWeight','bold');
-            app.ResultsStabilitySweepParamDD = uidropdown(midG, ...
-                'Items',{'none','Reactor conversion','Purge beta','Separator phi(1)'}, 'Value','none');
-            uilabel(midG,'Text','min/max/pts','FontWeight','bold');
-            sweepRangeG = uigridlayout(midG,[1 3], 'ColumnWidth',{'1x','1x',54}, 'Padding',[0 0 0 0]);
-            app.ResultsStabilitySweepMinField = uieditfield(sweepRangeG, 'numeric', 'Value',0.1);
-            app.ResultsStabilitySweepMaxField = uieditfield(sweepRangeG, 'numeric', 'Value',0.9);
-            app.ResultsStabilitySweepPtsField = uieditfield(sweepRangeG, 'numeric', 'Value',11, 'Limits',[2 200], 'RoundFractionalValues','on');
-            app.ResultsStabilitySweepPtsField.Layout.Column = 3;
-            uilabel(midG,'Text','');
-            uilabel(midG,'Text','');
-            uilabel(midG,'Text','');
-            uilabel(midG,'Text','');
 
             axP = uipanel(gl, 'Title','Results Trends', 'FontWeight','bold');
             axP.Layout.Row = 3;
@@ -636,6 +662,66 @@ classdef MathLabApp < handle
 
             app.resetResultsView();
             app.refreshResultsTargetOptions();
+        end
+
+        function buildResultsTablesTab(app)
+            t = uitab(app.Tabs, 'Title', ' Results - Tables ');
+            app.ResultsTablesTab = t;
+            gl = uigridlayout(t, [4 2], 'RowHeight',{30,30,30,'1x'}, ...
+                'ColumnWidth',{'1x','1x'}, 'Padding',[12 12 12 12], 'RowSpacing',8, 'ColumnSpacing',8);
+            uilabel(gl,'Text','Tables workspace (report prep)','FontWeight','bold','FontSize',13);
+            uilabel(gl,'Text','Open read-only tables and export quickly to CSV.');
+            uibutton(gl,'push','Text','Open Stream Table', 'ButtonPushedFcn',@(~,~) app.openStreamTablePopup());
+            uibutton(gl,'push','Text','Open Unit Table', 'ButtonPushedFcn',@(~,~) app.openUnitTablePopup());
+            app.ResultsExportStreamCsvBtn = uibutton(gl,'push','Text','Export Stream Table CSV', ...
+                'ButtonPushedFcn',@(~,~) app.exportResultsStreamCsv());
+            app.ResultsExportUnitCsvBtn = uibutton(gl,'push','Text','Export Unit Table CSV', ...
+                'ButtonPushedFcn',@(~,~) app.exportResultsUnitCsv());
+            notes = uitextarea(gl,'Editable','off','Value',{'CSV files include displayed units in column names where available.'});
+            notes.Layout.Row = 4;
+            notes.Layout.Column = [1 2];
+        end
+
+        function buildResultsStabilityTab(app)
+            t = uitab(app.Tabs, 'Title', ' Results - Stability ');
+            app.ResultsStabilityTab = t;
+            gl = uigridlayout(t, [3 4], 'RowHeight',{28,28,'1x'}, ...
+                'ColumnWidth',{'fit','1x','fit','1x'}, 'Padding',[12 12 12 12], 'ColumnSpacing',8, 'RowSpacing',6);
+            uilabel(gl,'Text','Sweep parameter','FontWeight','bold');
+            app.ResultsStabilitySweepParamDD = uidropdown(gl, ...
+                'Items',{'none','Reactor conversion','Purge beta','Separator phi(1)'}, 'Value','none');
+            uilabel(gl,'Text','min/max/pts','FontWeight','bold');
+            sweepRangeG = uigridlayout(gl,[1 3], 'ColumnWidth',{'1x','1x',54}, 'Padding',[0 0 0 0]);
+            app.ResultsStabilitySweepMinField = uieditfield(sweepRangeG, 'numeric', 'Value',0.1);
+            app.ResultsStabilitySweepMaxField = uieditfield(sweepRangeG, 'numeric', 'Value',0.9);
+            app.ResultsStabilitySweepPtsField = uieditfield(sweepRangeG, 'numeric', 'Value',11, 'Limits',[2 200], 'RoundFractionalValues','on');
+            app.ResultsStabilitySweepPtsField.Layout.Column = 3;
+            app.ResultsStabilityBtn = uibutton(gl, 'push', 'Text','Run Stability Overlay on Trends Plot', ...
+                'FontWeight','bold', 'BackgroundColor',[0.93 0.88 0.99], ...
+                'ButtonPushedFcn',@(~,~) app.updateStabilityOverlay());
+            app.ResultsStabilityBtn.Layout.Column = [1 2];
+            txt = uitextarea(gl, 'Editable','off', 'Value', ...
+                {'Stability charts are rendered on the Trends axes for now.', ...
+                 'Use this tab to configure the sweep and run stability overlay.'});
+            txt.Layout.Column = [3 4];
+            txt.Layout.Row = [2 3];
+        end
+
+        function buildResultsExportTab(app)
+            t = uitab(app.Tabs, 'Title', ' Results - Export ');
+            app.ResultsExportTab = t;
+            gl = uigridlayout(t, [6 1], 'RowHeight',{28,28,28,28,28,'1x'}, 'Padding',[12 12 12 12], 'RowSpacing',8);
+            uilabel(gl,'Text','CSV-first reporting exports','FontWeight','bold','FontSize',13);
+            app.ResultsExportSummaryCsvBtn = uibutton(gl,'push','Text','Export Summary CSV', ...
+                'ButtonPushedFcn',@(~,~) app.exportResultsSummaryCsv());
+            app.ResultsExportTracesCsvBtn = uibutton(gl,'push','Text','Export Trends Traces CSV', ...
+                'ButtonPushedFcn',@(~,~) app.exportResultsTracesCsv());
+            app.ResultsExportSnapshotsCsvBtn = uibutton(gl,'push','Text','Export Snapshot History CSV', ...
+                'ButtonPushedFcn',@(~,~) app.exportResultsSnapshotsCsv());
+            helpText = uitextarea(gl,'Editable','off', 'Value', ...
+                {'All exports are written to output/results unless a custom export path has been selected.', ...
+                 'CSV schema is intentionally flat for spreadsheet/report compatibility.'});
+            helpText.Layout.Row = 6;
         end
 
         % ================================================================
@@ -2033,13 +2119,18 @@ classdef MathLabApp < handle
                 app.LogArea.Value = cellstr(solver.logLines);
 
                 app.captureResultsSnapshot(numel(solver.residualHistory)-1, solver.residualHistory(end));
+                app.refreshResultsSummaryModel();
 
                 app.refreshResultsTable();
                 app.updateStabilityOverlay();
+                app.refreshResultsSummaryPanel();
 
                 app.refreshStreamTables();
 
             catch ME
+                app.resultsSummary = struct('status','Solve failed','residual',NaN,'iterations',0, ...
+                    'streamKey','-','unitKey','-','streamText','-','unitText','-','deltaText','-');
+                app.refreshResultsSummaryPanel();
                 title(app.ResidualAxes, 'FAILED');
                 logLines = [{'SOLVE FAILED:'; ME.message; ''}; ...
                     arrayfun(@(f) sprintf('  %s (line %d)',f.name,f.line), ME.stack,'Uni',false)];
@@ -2535,6 +2626,168 @@ classdef MathLabApp < handle
                     end
                 end
             end
+        end
+
+        function refreshResultsSummaryModel(app)
+            prevResidual = app.resultsSummary.residual;
+            summary = struct('status','Not solved','residual',NaN,'iterations',0, ...
+                'streamKey','-','unitKey','-','streamText','-','unitText','-','deltaText','-');
+            if isempty(app.lastSolver)
+                app.resultsSummary = summary;
+                return;
+            end
+
+            iters = 0;
+            try
+                iters = max(0, numel(app.lastSolver.residualHistory)-1);
+            catch
+                iters = 0;
+            end
+            residual = NaN;
+            try
+                if ~isempty(app.lastSolver.residualHistory)
+                    residual = app.lastSolver.residualHistory(end);
+                end
+            catch
+            end
+            try
+                if app.lastSolver.converged
+                    summary.status = 'Converged';
+                else
+                    summary.status = 'Non-converged';
+                end
+            catch
+                summary.status = 'Solved';
+            end
+            summary.residual = residual;
+            summary.iterations = iters;
+
+            if ~isempty(app.lastFlowsheet) && ~isempty(app.lastFlowsheet.streamDisplayNames)
+                nm = char(string(app.lastFlowsheet.streamDisplayNames{1}));
+                summary.streamKey = nm;
+                sref = app.lastFlowsheet.streamDisplayRefs{1};
+                summary.streamText = sprintf('%s | %s=%.4g | %s=%.4g | %s=%.4g', nm, ...
+                    app.unitLabel('flow','n_dot'), app.fromSI(sref.n_dot,'flow'), ...
+                    app.unitLabel('temperature','T'), app.fromSI(sref.T,'temperature'), ...
+                    app.unitLabel('pressure','P'), app.fromSI(sref.P,'pressure'));
+            end
+
+            if ~isempty(app.lastFlowsheet) && ~isempty(app.lastFlowsheet.units)
+                u = app.lastFlowsheet.units{1};
+                uk = sprintf('U1_%s', app.shortTypeName(u));
+                summary.unitKey = uk;
+                upairs = app.unitObjectResultPairs(u);
+                if isempty(upairs)
+                    summary.unitText = sprintf('%s | no reportable metrics', uk);
+                else
+                    summary.unitText = sprintf('%s | %s: %s', uk, upairs{1,1}, app.formatSpecValue(upairs{1,2}));
+                end
+            end
+
+            if isfinite(prevResidual) && isfinite(summary.residual)
+                d = summary.residual - prevResidual;
+                summary.deltaText = sprintf('Residual delta vs previous run: %+0.3e', d);
+            else
+                summary.deltaText = 'Residual delta vs previous run: n/a';
+            end
+            app.resultsSummary = summary;
+        end
+
+        function refreshResultsSummaryPanel(app)
+            if isempty(app.ResultsSummaryStatusLabel) || ~isvalid(app.ResultsSummaryStatusLabel)
+                return;
+            end
+            s = app.resultsSummary;
+            app.ResultsSummaryStatusLabel.Text = sprintf('Status: %s', s.status);
+            if isfinite(s.residual)
+                app.ResultsSummaryResidualLabel.Text = sprintf('Final residual: %.3e', s.residual);
+            else
+                app.ResultsSummaryResidualLabel.Text = 'Final residual: -';
+            end
+            app.ResultsSummaryIterLabel.Text = sprintf('Iterations: %d', s.iterations);
+            app.ResultsSummaryDeltaLabel.Text = s.deltaText;
+            if ~isempty(app.ResultsSummaryStreamLabel) && isvalid(app.ResultsSummaryStreamLabel)
+                app.ResultsSummaryStreamLabel.Text = sprintf('Key stream: %s', s.streamText);
+            end
+            if ~isempty(app.ResultsSummaryUnitLabel) && isvalid(app.ResultsSummaryUnitLabel)
+                app.ResultsSummaryUnitLabel.Text = sprintf('Key unit: %s', s.unitText);
+            end
+        end
+
+        function exportResultsSummaryCsv(app)
+            T = table(string(app.resultsSummary.status), app.resultsSummary.residual, app.resultsSummary.iterations, ...
+                string(app.resultsSummary.streamKey), string(app.resultsSummary.streamText), ...
+                string(app.resultsSummary.unitKey), string(app.resultsSummary.unitText), ...
+                string(app.resultsSummary.deltaText), ...
+                'VariableNames', {'status','final_residual','iterations','key_stream','key_stream_summary', ...
+                'key_unit','key_unit_summary','delta_note'});
+            outDir = app.resolveInitialExportPath();
+            filepath = fullfile(outDir, app.autoFileName('results_summary', 'csv'));
+            writetable(T, filepath);
+            app.setStatus(sprintf('Results summary exported to %s', filepath));
+        end
+
+        function exportResultsSnapshotsCsv(app)
+            if isempty(app.resultsSnapshots)
+                uialert(app.Fig,'No snapshots available. Run solve first.','No snapshot data');
+                return;
+            end
+            n = numel(app.resultsSnapshots);
+            residual = app.resultsSnapshotResiduals(:);
+            iter = app.resultsSnapshotIters(:);
+            status = repmat(string(app.resultsSummary.status), n, 1);
+            T = table(iter, residual, status, 'VariableNames', {'iteration','residual','solve_status'});
+            outDir = app.resolveInitialExportPath();
+            filepath = fullfile(outDir, app.autoFileName('results_snapshots', 'csv'));
+            writetable(T, filepath);
+            app.setStatus(sprintf('Snapshot history exported to %s', filepath));
+        end
+
+        function exportResultsTracesCsv(app)
+            traces = {};
+            rows = 0;
+            for idxCfg = 1:4
+                cfg = app.resultsConfigControls(idxCfg);
+                x = app.resultsSeriesForConfig(cfg.xVarDD.Value, cfg.targetDD.Value, cfg.compDD.Value);
+                y = app.resultsSeriesForConfig(cfg.yVarDD.Value, cfg.targetDD.Value, cfg.compDD.Value);
+                n = min(numel(x), numel(y));
+                if n == 0
+                    continue;
+                end
+                x = x(1:n);
+                y = y(1:n);
+                name = repmat(string(sprintf('plot_%d', idxCfg)), n, 1);
+                tx = repmat(string(cfg.xVarDD.Value), n, 1);
+                ty = repmat(string(cfg.yVarDD.Value), n, 1);
+                tgt = repmat(string(cfg.targetDD.Value), n, 1);
+                comp = repmat(string(cfg.compDD.Value), n, 1);
+                axisName = repmat(string(cfg.axisDD.Value), n, 1);
+                part = table(name, tx, ty, tgt, comp, axisName, x(:), y(:), ...
+                    'VariableNames', {'trace_name','x_var','y_var','target','component','axis','x','y'});
+                traces{end+1} = part; %#ok<AGROW>
+                rows = rows + n;
+            end
+            if rows == 0
+                uialert(app.Fig,'No trace data available for CSV export.','No trace data');
+                return;
+            end
+            T = vertcat(traces{:});
+            outDir = app.resolveInitialExportPath();
+            filepath = fullfile(outDir, app.autoFileName('results_traces', 'csv'));
+            writetable(T, filepath);
+            app.setStatus(sprintf('Results traces exported to %s', filepath));
+        end
+
+        function exportResultsStreamCsv(app)
+            T = app.buildDisplayStreamTable();
+            outDir = app.resolveInitialExportPath();
+            filepath = fullfile(outDir, app.autoFileName('stream_table', 'csv'));
+            writetable(T, filepath);
+            app.setStatus(sprintf('Stream table exported to %s', filepath));
+        end
+
+        function exportResultsUnitCsv(app)
+            app.exportUnitTableToOutput('csv');
         end
 
         function resetResultsView(app)
