@@ -454,7 +454,7 @@ function addStreamAliasesToFlowsheet(fs, aliasByOutlet, streams)
 end
 
 function tf = isIdentityLinkDef(def)
-    tf = strcmp(def.type, 'Link') && ~(isfield(def, 'mode') && ~strcmp(def.mode, 'identity'));
+    tf = strcmp(def.type, 'Link') && isfield(def, 'mode') && strcmp(def.mode, 'identity');
     if isfield(def, 'isIdentity')
         tf = logical(def.isIdentity);
     end

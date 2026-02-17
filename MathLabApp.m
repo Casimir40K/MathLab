@@ -3590,6 +3590,7 @@ classdef MathLabApp < handle
             % Restore units from definitions
             app.units = {};
             app.unitDefs = {};
+            skippedUnits = strings(0,1);
             if isfield(cfg, 'unitDefs') && ~isempty(cfg.unitDefs)
                 for i = 1:numel(cfg.unitDefs)
                     def = cfg.unitDefs{i};
@@ -3597,8 +3598,21 @@ classdef MathLabApp < handle
                     if ~isempty(u)
                         app.units{end+1} = u;
                         app.unitDefs{end+1} = def;
+                    else
+                        dType = "<unknown>";
+                        if isstruct(def) && isfield(def,'type')
+                            dType = string(def.type);
+                        end
+                        skippedUnits(end+1,1) = sprintf('#%d %s', i, dType); %#ok<AGROW>
                     end
                 end
+            end
+
+            if ~isempty(skippedUnits)
+                warnMsg = sprintf('Loaded %d/%d units. Skipped unit defs: %s', ...
+                    numel(app.units), numel(cfg.unitDefs), strjoin(cellstr(skippedUnits), ', '));
+                warning('%s', warnMsg);
+                app.setStatus(warnMsg);
             end
 
             % Restore solver settings
@@ -3900,7 +3914,10 @@ classdef MathLabApp < handle
                     def = cfg.unitDefs{i};
                     switch def.type
                         case 'Link'
-                            isIdentityLink = ~(isfield(def, 'mode') && ~strcmp(def.mode, 'identity'));
+                            isIdentityLink = false;
+                            if isfield(def, 'mode')
+                                isIdentityLink = strcmp(def.mode, 'identity');
+                            end
                             if isfield(def, 'isIdentity')
                                 isIdentityLink = logical(def.isIdentity);
                             end
@@ -4290,7 +4307,7 @@ classdef MathLabApp < handle
         end
 
         function tf = isIdentityLinkDef(~, def)
-            tf = strcmp(def.type, 'Link') && ~(isfield(def, 'mode') && ~strcmp(def.mode, 'identity'));
+            tf = strcmp(def.type, 'Link') && isfield(def, 'mode') && strcmp(def.mode, 'identity');
             if isfield(def, 'isIdentity')
                 tf = logical(def.isIdentity);
             end
