@@ -44,6 +44,11 @@ classdef ProcessSolver < handle
         % Preflight diagnostics for contradictory fixed stream specs.
         failOnKnownSpecConflicts logical = true
 
+        % Preflight diagnostics for disconnected/flat unknowns whose
+        % Jacobian column is numerically near-zero at initialization.
+        failOnJacobianDeadColumns logical = true
+        jacobianDeadColumnTol double = 1e-12
+
         printToConsole = false
         consoleStride  = 10
 
@@ -160,6 +165,9 @@ classdef ProcessSolver < handle
             if ~ok
                 error('Initial residual returned NaN/Inf. Check initial guesses (n_dot,y,T,P).');
             end
+
+            obj.checkInitialJacobianConnectivity(x, r);
+
             w = obj.buildEquationWeights(eqNames, numel(r), r);
             if obj.autoScale
                 obj.log('Auto-scaling enabled: weights derived from initial |r| (minMag=%.1e, wRange=[%.2e, %.2e])', ...
@@ -1059,6 +1067,56 @@ classdef ProcessSolver < handle
             end
             v = s.known.(field);
             tf = islogical(v) && isscalar(v) && v;
+        end
+
+        function checkInitialJacobianConnectivity(obj, x, r0)
+            if isempty(x)
+                return
+            end
+
+            J0 = obj.fdJacobianSafe(x, r0);
+            colNormInf = max(abs(J0), [], 1);
+            dead = find(colNormInf <= obj.jacobianDeadColumnTol | ~isfinite(colNormInf));
+            if isempty(dead)
+                return
+            end
+
+            msgLines = strings(numel(dead),1);
+            for i = 1:numel(dead)
+                k = dead(i);
+                msgLines(i) = obj.describeUnknown(obj.map(k));
+                obj.log('Jacobian dead-column candidate: x(%d) %s (||J(:,k)||_inf=%.3e)', ...
+                    k, msgLines(i), colNormInf(k));
+            end
+
+            msg = sprintf(['Detected %d unknown(s) with near-zero initial Jacobian columns. ' ...
+                'This indicates disconnected DOFs, conflicting constraints, or numerically flat equations.'], numel(dead));
+            if obj.failOnJacobianDeadColumns
+                error('%s Unknown(s): %s', msg, strjoin(cellstr(msgLines), '; '));
+            else
+                warning('%s Unknown(s): %s', msg, strjoin(cellstr(msgLines), '; '));
+            end
+        end
+
+        function txt = describeUnknown(~, m)
+            if strcmp(m.var, 'u')
+                txt = sprintf('[unit %d] manipulated %s.%s', m.unitIndex, class(m.owner), m.field);
+                return
+            end
+
+            si = m.streamIndex;
+            switch m.var
+                case 'z'
+                    txt = sprintf('[stream %d] n_dot(log)', si);
+                case 'a'
+                    txt = sprintf('[stream %d] composition logit comp=%d', si, m.subIndex);
+                case 'T'
+                    txt = sprintf('[stream %d] temperature', si);
+                case 'P'
+                    txt = sprintf('[stream %d] pressure', si);
+                otherwise
+                    txt = sprintf('[stream %d] var=%s', si, m.var);
+            end
         end
 
         function [dominantMixer, eqIdx, eqVal] = findDominantMixer(obj, r)
