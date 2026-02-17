@@ -1992,8 +1992,14 @@ classdef MathLabApp < handle
                 app.lastSolver = solver;
 
                 % Final plot cleanup
-                title(app.ResidualAxes, ...
-                    sprintf('Converged in %d iterations', numel(solver.residualHistory)-1));
+                if solver.converged
+                    title(app.ResidualAxes, ...
+                        sprintf('Converged in %d iterations', numel(solver.residualHistory)-1));
+                    app.setStatus('Solve completed.');
+                else
+                    title(app.ResidualAxes, 'NON-CONVERGED');
+                    app.setStatus('Non-converged iterate; balances not satisfied.');
+                end
 
                 app.LogArea.Value = cellstr(solver.logLines);
 
@@ -2002,7 +2008,6 @@ classdef MathLabApp < handle
                 app.refreshResultsTable();
 
                 app.refreshStreamTables();
-                app.setStatus('Solve completed.');
 
             catch ME
                 title(app.ResidualAxes, 'FAILED');
@@ -2010,7 +2015,11 @@ classdef MathLabApp < handle
                     arrayfun(@(f) sprintf('  %s (line %d)',f.name,f.line), ME.stack,'Uni',false)];
                 app.LogArea.Value = logLines;
                 app.writeErrorLog('solve_error', logLines);
-                app.setStatus('Solve failed — see log (saved to output/logs).');
+                if strcmp(ME.identifier, 'Flowsheet:NonConvergedSolve')
+                    app.setStatus('Non-converged iterate; balances not satisfied.');
+                else
+                    app.setStatus('Solve failed — see log (saved to output/logs).');
+                end
             end
         end
 

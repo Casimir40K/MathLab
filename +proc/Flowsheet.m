@@ -5,6 +5,8 @@ classdef Flowsheet < handle
         units     % cell array of unit objects (proc.units.*) with equations()
         streamDisplayNames % user-visible stream names for reporting (incl. aliases)
         streamDisplayRefs  % stream object handles aligned with streamDisplayNames
+        hasSolveAttempted logical = false
+        lastSolveConverged logical = false
     end
 
     methods
@@ -65,15 +67,24 @@ classdef Flowsheet < handle
             % Usage:
             %   solver = fs.solve();
             %   solver = fs.solve('maxIter',80,'tolAbs',1e-9,'printToConsole',true,'consoleStride',10);
+            %   solver = fs.solve(...,'allowNonConverged',true);
 
             obj.validate();  % throws if not runnable
+
+            p = inputParser;
+            p.KeepUnmatched = true;
+            p.addParameter('allowNonConverged', false, @(x)islogical(x)&&isscalar(x));
+            p.parse(varargin{:});
+            allowNonConverged = p.Results.allowNonConverged;
 
             solver = proc.ProcessSolver(obj.streams, obj.units);
 
             % Optional overrides: apply any name/value pair that matches a solver property
-            for k = 1:2:numel(varargin)
-                name = varargin{k};
-                val  = varargin{k+1};
+            unmatched = p.Unmatched;
+            fields = fieldnames(unmatched);
+            for i = 1:numel(fields)
+                name = fields{i};
+                val  = unmatched.(name);
                 if isprop(solver, name)
                     solver.(name) = val;
                 else
@@ -85,9 +96,25 @@ classdef Flowsheet < handle
             obj.checkDOF();
 
             solver.solve();
+
+            obj.hasSolveAttempted = true;
+            obj.lastSolveConverged = solver.converged;
+
+            if ~solver.converged && ~allowNonConverged
+                error('Flowsheet:NonConvergedSolve', ...
+                    ['Solve exited with a non-converged iterate; balances not satisfied. ' ...
+                     'exitFlag=%s, finalResidual=%.6e, finalWeightedResidual=%.6e. ' ...
+                     'Set allowNonConverged=true to inspect intermediate iterate only.'], ...
+                    char(solver.exitFlag), solver.finalResidual, solver.finalWeightedResidual);
+            end
         end
 
         function T = streamTable(obj, varargin)
+            if obj.hasSolveAttempted && ~obj.lastSolveConverged
+                error('Flowsheet:NonConvergedResults', ...
+                    'Cannot present streamTable as final results: non-converged iterate; balances not satisfied.');
+            end
+
             % Table including: name, n_dot, T, P, y_i, and species molar flows n_i = n_dot*y_i
             %
             % Options:
