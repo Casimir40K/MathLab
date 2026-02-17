@@ -215,6 +215,31 @@ Because stream compositions are packed with a softmax transform in `ProcessSolve
 | Line search failed | The problem may be too stiff — try smaller conversion or check connections |
 | Stream not found in dialog | Create the stream first on the Streams tab |
 
+### Why results can look “weird” after adding thermal/thermo units
+
+When a mass-only model behaves well but adding `Heater`/`Cooler`/energy-aware units causes tiny or unrealistic flows, check these first:
+
+1. **Under-constrained model (most common).**
+   Thermal units add additional unknowns (`T`, sometimes `P`) that must be closed by specs (`Tout`, `duty`, `Pout`, `dP`, etc.) and/or known flags in stream tables. If DOF is not square, the solver can still return a least-squares fit that is mathematically acceptable but physically odd.
+
+2. **T/P values entered but not marked as known.**
+   In the Streams tab, a numeric value is only an initial guess unless its checkbox is enabled in the Known Flags table.
+
+3. **Conflicting or missing unit thermal specs.**
+   Each heater/cooler must have exactly one thermal spec (`Tout` or `duty`) and at most one pressure mode (`dP`, `Pout`, or `PR`). Bad combinations can force inconsistent balances.
+
+4. **Reaction specification inconsistent with feed composition.**
+   If a reactant needed by stoichiometry is absent or nearly zero, conversion-style reactor equations can drive a near-degenerate solution and create surprising recycle behavior.
+
+5. **Aggressive separator/purge settings creating near-singular recycle loops.**
+   Very sharp split factors (phi near 0 or 1) plus strong recycle/purge can collapse some component flows to machine-level tiny values, especially when coupled with thermal constraints.
+
+6. **Thermo property validity range mismatch.**
+   If temperatures move outside correlation validity (or near limits), enthalpy differences can become unreliable and destabilize duty-based solves.
+
+7. **Poor initial guesses for recycle temperatures.**
+   Recycle loops with energy balances are more sensitive than mass-only loops; initialize recycle `T` closer to expected converged values.
+
 
 ## Regression Test Suite
 
@@ -231,4 +256,3 @@ The suite lives at `run_regression_suite.m` and covers:
 - mass-only reactor variants (`Stoichiometric`, `Conversion`, `Yield`, `Equilibrium`)
 - topology blocks (`Bypass`, `Splitter`, `Manifold`, `Recycle`)
 - spec/control blocks (`Source`, `Sink`, `DesignSpec`, `Adjust`, `Calculator`, `Constraint`)
-
