@@ -66,6 +66,12 @@ classdef ProcessSolver < handle
         % Runtime counter (including line-search and FD probes)
         residualEvalCount double = 0
 
+        % Explicit solve status (updated at solve() exit)
+        converged logical = false
+        exitFlag string = "not_run"
+        finalResidual double = NaN
+        finalWeightedResidual double = NaN
+
         % Optional callback: called each iteration as iterCallback(iter, rNorm)
         % Set this before calling solve() to get real-time updates.
         iterCallback = []   % function_handle or empty
@@ -105,6 +111,11 @@ classdef ProcessSolver < handle
         function solve(obj)
             obj.applySolverSettingsStruct();
             dbg = obj.resolveDebugOptions();
+
+            obj.converged = false;
+            obj.exitFlag = "running";
+            obj.finalResidual = NaN;
+            obj.finalWeightedResidual = NaN;
 
             obj.logLines = strings(0,1);
             obj.residualHistory = [];
@@ -170,6 +181,10 @@ classdef ProcessSolver < handle
                     obj.weightedResidualHistory(end+1) = rnW;
                     obj.stepHistory(end+1)     = 0;
                     obj.alphaHistory(end+1)    = 0;
+                    obj.converged = true;
+                    obj.exitFlag = "converged";
+                    obj.finalResidual = rnU;
+                    obj.finalWeightedResidual = rnW;
                     obj.log('Converged at iter %d: ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', k, rnU, rnW, obj.residualEvalCount);
                     obj.fireCallback(k, rnConv);
                     break
@@ -277,17 +292,21 @@ classdef ProcessSolver < handle
                 if k == obj.maxIter
                     finalR = norm(r);
                     finalRW = norm(w .* r);
+                    obj.converged = false;
+                    obj.exitFlag = "max_iter_nonconverged";
+                    obj.finalResidual = finalR;
+                    obj.finalWeightedResidual = finalRW;
                     obj.residualHistory(end+1) = finalR;
                     obj.weightedResidualHistory(end+1) = finalRW;
                     obj.stepHistory(end+1) = NaN;
                     obj.alphaHistory(end+1) = NaN;
-                    obj.log('Max iterations reached. Final ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', finalR, finalRW, obj.residualEvalCount);
+                    obj.log('Max iterations reached: non-converged iterate; balances not satisfied. Final ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', finalR, finalRW, obj.residualEvalCount);
                     if obj.useWeightedNormForConvergence
                         obj.fireCallback(k+1, finalRW);
                     else
                         obj.fireCallback(k+1, finalR);
                     end
-                    warning('Max iterations reached. Final ||r||=%.6e, ||W*r||=%.6e', finalR, finalRW);
+                    warning('Max iterations reached: non-converged iterate; balances not satisfied. Final ||r||=%.6e, ||W*r||=%.6e', finalR, finalRW);
                 end
             end
 
@@ -304,6 +323,12 @@ classdef ProcessSolver < handle
         end
 
         function T = streamTable(obj)
+            if ~obj.converged
+                error('ProcessSolver:NonConvergedResults', ...
+                    'Cannot present streamTable as final results: non-converged iterate; balances not satisfied. exitFlag=%s, finalResidual=%.6e, finalWeightedResidual=%.6e', ...
+                    char(obj.exitFlag), obj.finalResidual, obj.finalWeightedResidual);
+            end
+
             N = numel(obj.streams);
             names = strings(N,1); n_dot = nan(N,1);
             TT = nan(N,1); PP = nan(N,1); Y = nan(N,obj.ns);
