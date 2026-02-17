@@ -28,6 +28,7 @@ classdef ProcessSolver < handle
         % magnitudes so that all equations contribute equally to the norm.
         autoScale logical = false
         autoScaleMinMagnitude double = 1e-6
+        autoScaleMaxWeightFactor double = 1e3
 
         % Jacobian refresh trigger when convergence stalls
         stallRatioThreshold = 0.9
@@ -40,6 +41,14 @@ classdef ProcessSolver < handle
         % Remove unit-level normalization residuals when y is already
         % constrained by softmax parameterization in unpackUnknowns().
         removeRedundantNormalizationConstraints logical = true
+
+        % Preflight diagnostics for contradictory fixed stream specs.
+        failOnKnownSpecConflicts logical = true
+
+        % Preflight diagnostics for disconnected/flat unknowns whose
+        % Jacobian column is numerically near-zero at initialization.
+        failOnJacobianDeadColumns logical = true
+        jacobianDeadColumnTol double = 1e-12
 
         printToConsole = false
         consoleStride  = 10
@@ -125,201 +134,267 @@ classdef ProcessSolver < handle
 
             obj.residualEvalCount = 0;
 
-            nDisabled = obj.configureNormalizationConstraints();
-            if obj.removeRedundantNormalizationConstraints
-                obj.log('Normalization constraints disabled on %d unit(s) (y uses softmax parameterization).', nDisabled);
-            else
-                obj.log('Normalization constraints kept on all units.');
-            end
+            stage = "startup";
+            iter = 0;
+            x = [];
+            r = [];
+            w = [];
+            eqNames = strings(0,1);
 
-            [x, obj.map] = obj.packUnknowns();
-            eqNames = obj.buildEquationLabels();
-
-            vars = string({obj.map.var});
-            obj.log('Packed unknowns: %d total (%d T, %d P)', ...
-                numel(x), sum(vars=="T"), sum(vars=="P"));
-
-            [r, ok] = obj.tryResiduals(x);
-            if ~ok
-                error('Initial residual returned NaN/Inf. Check initial guesses (n_dot,y,T,P).');
-            end
-            w = obj.buildEquationWeights(eqNames, numel(r), r);
-            if obj.autoScale
-                obj.log('Auto-scaling enabled: weights derived from initial |r| (minMag=%.1e, wRange=[%.2e, %.2e])', ...
-                    obj.autoScaleMinMagnitude, min(w), max(w));
-            end
-            r0u = norm(r);
-            r0w = norm(w .* r);
-            obj.residualHistory(end+1) = r0u;
-            obj.weightedResidualHistory(end+1) = r0w;
-            obj.stepHistory(end+1)     = NaN;
-            obj.alphaHistory(end+1)    = NaN;
-
-            obj.log('Initial ||r|| = %.6e, ||W*r|| = %.6e (unknowns=%d, eqs=%d)', r0u, r0w, numel(x), numel(r));
-
-            % Fire callback for initial state
-            if obj.useWeightedNormForConvergence
-                obj.fireCallback(0, r0w);
-            else
-                obj.fireCallback(0, r0u);
-            end
-
-            J = [];
-            forceFD = true;
-            stallCount = 0;
-            disableBroydenOnce = false;
-
-            for k = 1:obj.maxIter
-                rnU = norm(r);
-                rnW = norm(w .* r);
-                rnConv = rnU;
-                if obj.useWeightedNormForConvergence
-                    rnConv = rnW;
+            try
+                stage = "configure_normalization";
+                nDisabled = obj.configureNormalizationConstraints();
+                if obj.removeRedundantNormalizationConstraints
+                    obj.log('Normalization constraints disabled on %d unit(s) (y uses softmax parameterization).', nDisabled);
+                else
+                    obj.log('Normalization constraints kept on all units.');
                 end
-                if rnConv < obj.tolAbs
+
+                stage = "pack_unknowns";
+                [x, obj.map] = obj.packUnknowns();
+                eqNames = obj.buildEquationLabels();
+
+                stage = "preflight_spec_conflicts";
+                specIssues = obj.detectKnownSpecConflicts();
+                if ~isempty(specIssues)
+                    for i = 1:numel(specIssues)
+                        obj.log('Spec conflict: %s', specIssues(i));
+                    end
+                    msg = sprintf(['Detected %d contradictory known/spec constraint(s). ' ...
+                        'This commonly causes apparent thermo non-convergence with static residuals.'], numel(specIssues));
+                    if obj.failOnKnownSpecConflicts
+                        error('%s Clear conflicting Known flags or unit specs and re-run.', msg);
+                    else
+                        warning(char(msg));
+                    end
+                end
+
+                vars = string({obj.map.var});
+                obj.log('Packed unknowns: %d total (%d T, %d P)', ...
+                    numel(x), sum(vars=="T"), sum(vars=="P"));
+
+                stage = "initial_residual";
+                [r, ok] = obj.tryResiduals(x);
+                if ~ok
+                    error('Initial residual returned NaN/Inf. Check initial guesses (n_dot,y,T,P).');
+                end
+
+                stage = "preflight_jacobian_connectivity";
+                obj.checkInitialJacobianConnectivity(x, r);
+
+                stage = "build_weights";
+                w = obj.buildEquationWeights(eqNames, numel(r), r);
+                if obj.autoScale
+                    obj.log('Auto-scaling enabled: weights derived from initial |r| (minMag=%.1e, wRange=[%.2e, %.2e])', ...
+                        obj.autoScaleMinMagnitude, min(w), max(w));
+                end
+                r0u = norm(r);
+                r0w = norm(w .* r);
+                obj.residualHistory(end+1) = r0u;
+                obj.weightedResidualHistory(end+1) = r0w;
+                obj.stepHistory(end+1)     = NaN;
+                obj.alphaHistory(end+1)    = NaN;
+
+                obj.log('Initial ||r|| = %.6e, ||W*r|| = %.6e (unknowns=%d, eqs=%d)', r0u, r0w, numel(x), numel(r));
+
+                % Fire callback for initial state
+                if obj.useWeightedNormForConvergence
+                    obj.fireCallback(0, r0w);
+                else
+                    obj.fireCallback(0, r0u);
+                end
+
+                stage = "iteration_loop";
+                J = [];
+                forceFD = true;
+                stallCount = 0;
+                disableBroydenOnce = false;
+
+                for k = 1:obj.maxIter
+                    iter = k;
+                    rnU = norm(r);
+                    rnW = norm(w .* r);
+                    rnConv = rnU;
+                    if obj.useWeightedNormForConvergence
+                        rnConv = rnW;
+                    end
+                    if rnConv < obj.tolAbs
+                        obj.residualHistory(end+1) = rnU;
+                        obj.weightedResidualHistory(end+1) = rnW;
+                        obj.stepHistory(end+1)     = 0;
+                        obj.alphaHistory(end+1)    = 0;
+                        obj.converged = true;
+                        obj.exitFlag = "converged";
+                        obj.finalResidual = rnU;
+                        obj.finalWeightedResidual = rnW;
+                        obj.log('Converged at iter %d: ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', k, rnU, rnW, obj.residualEvalCount);
+                        obj.fireCallback(k, rnConv);
+                        break
+                    end
+
+                    doFD = forceFD || isempty(J) || mod(k-1, max(1,obj.kFD)) == 0;
+                    if doFD
+                        stage = sprintf('iter_%d_fd_jacobian', k);
+                        J  = obj.fdJacobianSafe(x, r);
+                        jacobianMode = "FD";
+                        forceFD = false;
+                    else
+                        jacobianMode = "REUSE";
+                    end
+
+                    stage = sprintf('iter_%d_linear_solve', k);
+                    dx = obj.solveLinearLM(J, -r, w);
+
+                    if any(~isfinite(dx))
+                        error('dx contains NaN/Inf. Model may be ill-conditioned.');
+                    end
+
+                    stage = sprintf('iter_%d_line_search', k);
+                [accepted, x_new, r_new, alpha, bt, stagnationReject] = obj.backtrackingLineSearch(x, dx, rnU, rnW, w);
+                    if ~accepted
+                        if stagnationReject
+                            obj.log('Iter %3d: stagnation reject (no strict ||W*r|| decrease found in line search).', k);
+                        end
+
+                        % Fallback: discard reused/Broyden Jacobian and retry with
+                        % a fresh finite-difference Jacobian at the current state.
+                        stage = sprintf('iter_%d_fd_retry', k);
+                        J  = obj.fdJacobianSafe(x, r);
+                        jacobianMode = "FD-RETRY";
+                        forceFD = false;
+
+                        stage = sprintf('iter_%d_linear_retry', k);
+                        dx = obj.solveLinearLM(J, -r, w);
+
+                        stage = sprintf('iter_%d_line_search_retry', k);
+                        [accepted, x_new, r_new, alpha, bt, stagnationReject] = obj.backtrackingLineSearch(x, dx, rnU, rnW, w);
+
+                        if ~accepted && stagnationReject
+                            obj.log('Iter %3d: stagnation reject persisted after FD retry.', k);
+                        end
+
+                        if ~accepted
+                            error('Line search failed at iteration %d.', k);
+                        end
+                    end
+
+                    % Accepted step
+                    s = x_new - x;
+                    rPrev = r;
+                    x = x_new;
+                    r = r_new;
+
+                    % Update Jacobian after accepted step
+                    if obj.enableBroyden && ~disableBroydenOnce
+                        [J, broydenAccepted] = obj.tryBroydenUpdate(J, s, r - rPrev);
+                        if broydenAccepted
+                            jacobianMode = jacobianMode + "+BROYDEN";
+                        else
+                            forceFD = true;
+                            jacobianMode = jacobianMode + "+BROYDEN-SKIP";
+                        end
+                    elseif disableBroydenOnce
+                        disableBroydenOnce = false;
+                        jacobianMode = jacobianMode + "+BROYDEN-OFF";
+                    end
+
+                    rnWNew = norm(w .* r);
+                    if rnWNew / max(rnW, eps) > obj.stallRatioThreshold
+                        stallCount = stallCount + 1;
+                    else
+                        stallCount = 0;
+                    end
+                    if stallCount >= max(1, round(obj.stallIterWindow))
+                        forceFD = true;
+                        disableBroydenOnce = true;
+                        stallCount = 0;
+                        obj.log('Stall detected at iter %d (ratio=%.3f). Forcing FD rebuild and skipping Broyden next step.', ...
+                            k, rnWNew / max(rnW, eps));
+                    end
+
+                    % Record history
                     obj.residualHistory(end+1) = rnU;
                     obj.weightedResidualHistory(end+1) = rnW;
-                    obj.stepHistory(end+1)     = 0;
-                    obj.alphaHistory(end+1)    = 0;
-                    obj.converged = true;
-                    obj.exitFlag = "converged";
-                    obj.finalResidual = rnU;
-                    obj.finalWeightedResidual = rnW;
-                    obj.log('Converged at iter %d: ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', k, rnU, rnW, obj.residualEvalCount);
+                    obj.stepHistory(end+1)     = norm(dx);
+                    obj.alphaHistory(end+1)    = alpha;
+
+                    relRnU = rnU / max(r0u, eps);
+                    relRnW = rnW / max(r0w, eps);
+                    obj.log('Iter %3d: ||r||=%.4e (rel=%.3e)  ||W*r||=%.4e (rel=%.3e)  ||dx||=%.3e  alpha=%.3e  bt=%d  J=%s', ...
+                        k, rnU, relRnU, rnW, relRnW, norm(dx), alpha, bt, jacobianMode);
+
+                    if dbg.level >= 1
+                        obj.debugPrintIter(k, rnW, r, dx, alpha, bt, dbg);
+                        if dbg.level >= 3 && dbg.every > 0 && mod(k, dbg.every) == 0
+                            obj.debugPrintTopResiduals(r, dbg, eqNames, sprintf('iter %d', k));
+                        end
+                        if dbg.level >= 2 && dbg.every > 0 && mod(k, dbg.every) == 0
+                            obj.debugPrintMixerCompositionConsistency(r, dbg, sprintf('iter %d', k));
+                        end
+                    end
+
+                    % Fire callback for real-time plotting
                     obj.fireCallback(k, rnConv);
-                    break
-                end
 
-                doFD = forceFD || isempty(J) || mod(k-1, max(1,obj.kFD)) == 0;
-                if doFD
-                    J  = obj.fdJacobianSafe(x, r);
-                    jacobianMode = "FD";
-                    forceFD = false;
-                else
-                    jacobianMode = "REUSE";
-                end
-
-                dx = obj.solveLinearLM(J, -r, w);
-
-                if any(~isfinite(dx))
-                    error('dx contains NaN/Inf. Model may be ill-conditioned.');
-                end
-
-                [accepted, x_new, r_new, alpha, bt, stagnationReject] = obj.backtrackingLineSearch(x, dx, rnW, w);
-                if ~accepted
-                    if stagnationReject
-                        obj.log('Iter %3d: stagnation reject (no strict ||W*r|| decrease found in line search).', k);
-                    end
-
-                    % Fallback: discard reused/Broyden Jacobian and retry with
-                    % a fresh finite-difference Jacobian at the current state.
-                    J  = obj.fdJacobianSafe(x, r);
-                    jacobianMode = "FD-RETRY";
-                    forceFD = false;
-
-                    dx = obj.solveLinearLM(J, -r, w);
-                    [accepted, x_new, r_new, alpha, bt, stagnationReject] = obj.backtrackingLineSearch(x, dx, rnW, w);
-
-                    if ~accepted && stagnationReject
-                        obj.log('Iter %3d: stagnation reject persisted after FD retry.', k);
-                    end
-
-                    if ~accepted
-                        error('Line search failed at iteration %d.', k);
+                    if k == obj.maxIter
+                        finalR = norm(r);
+                        finalRW = norm(w .* r);
+                        obj.converged = false;
+                        obj.exitFlag = "max_iter_nonconverged";
+                        obj.finalResidual = finalR;
+                        obj.finalWeightedResidual = finalRW;
+                        obj.residualHistory(end+1) = finalR;
+                        obj.weightedResidualHistory(end+1) = finalRW;
+                        obj.stepHistory(end+1) = NaN;
+                        obj.alphaHistory(end+1) = NaN;
+                        obj.log('Max iterations reached: non-converged iterate; balances not satisfied. Final ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', finalR, finalRW, obj.residualEvalCount);
+                        if obj.useWeightedNormForConvergence
+                            obj.fireCallback(k+1, finalRW);
+                        else
+                            obj.fireCallback(k+1, finalR);
+                        end
+                        meMax = MException('ProcessSolver:MaxIterNonConverged', ...
+                            'Max iterations reached: non-converged iterate; balances not satisfied. Final ||r||=%.6e, ||W*r||=%.6e', finalR, finalRW);
+                        detail = obj.buildFailureReport(meMax, sprintf('iter_%d_max_iter', k), k, r, w, eqNames);
+                        obj.log('%s', detail);
+                        fprintf(2, '%s\n', detail);
+                        warning('%s', meMax.message);
                     end
                 end
 
-                % Accepted step
-                s = x_new - x;
-                rPrev = r;
-                x = x_new;
-                r = r_new;
+                stage = "post_iteration_diagnostics";
+                if dbg.level >= 2
+                    obj.debugPrintTopResiduals(r, dbg, eqNames, 'solver exit');
+                    obj.debugPrintMixerCompositionConsistency(r, dbg, 'solver exit');
+                end
 
-                % Update Jacobian after accepted step
-                if obj.enableBroyden && ~disableBroydenOnce
-                    [J, broydenAccepted] = obj.tryBroydenUpdate(J, s, r - rPrev);
-                    if broydenAccepted
-                        jacobianMode = jacobianMode + "+BROYDEN";
+                if ~obj.printToConsole && ~isempty(obj.logLines)
+                    fprintf('%s\n', obj.logLines(end));
+                end
+
+                stage = "unpack_solution";
+                obj.unpackUnknowns(x);
+
+            catch ME
+                obj.converged = false;
+                obj.exitFlag = "error";
+                if ~isempty(r)
+                    obj.finalResidual = norm(r);
+                    if ~isempty(w)
+                        obj.finalWeightedResidual = norm(w .* r);
                     else
-                        forceFD = true;
-                        jacobianMode = jacobianMode + "+BROYDEN-SKIP";
-                    end
-                elseif disableBroydenOnce
-                    disableBroydenOnce = false;
-                    jacobianMode = jacobianMode + "+BROYDEN-OFF";
-                end
-
-                rnWNew = norm(w .* r);
-                if rnWNew / max(rnW, eps) > obj.stallRatioThreshold
-                    stallCount = stallCount + 1;
-                else
-                    stallCount = 0;
-                end
-                if stallCount >= max(1, round(obj.stallIterWindow))
-                    forceFD = true;
-                    disableBroydenOnce = true;
-                    stallCount = 0;
-                    obj.log('Stall detected at iter %d (ratio=%.3f). Forcing FD rebuild and skipping Broyden next step.', ...
-                        k, rnWNew / max(rnW, eps));
-                end
-
-                % Record history
-                obj.residualHistory(end+1) = rnU;
-                obj.weightedResidualHistory(end+1) = rnW;
-                obj.stepHistory(end+1)     = norm(dx);
-                obj.alphaHistory(end+1)    = alpha;
-
-                relRnU = rnU / max(r0u, eps);
-                relRnW = rnW / max(r0w, eps);
-                obj.log('Iter %3d: ||r||=%.4e (rel=%.3e)  ||W*r||=%.4e (rel=%.3e)  ||dx||=%.3e  alpha=%.3e  bt=%d  J=%s', ...
-                    k, rnU, relRnU, rnW, relRnW, norm(dx), alpha, bt, jacobianMode);
-
-                if dbg.level >= 1
-                    obj.debugPrintIter(k, rnW, r, dx, alpha, bt, dbg);
-                    if dbg.level >= 3 && dbg.every > 0 && mod(k, dbg.every) == 0
-                        obj.debugPrintTopResiduals(r, dbg, eqNames, sprintf('iter %d', k));
-                    end
-                    if dbg.level >= 2 && dbg.every > 0 && mod(k, dbg.every) == 0
-                        obj.debugPrintMixerCompositionConsistency(r, dbg, sprintf('iter %d', k));
+                        obj.finalWeightedResidual = obj.finalResidual;
                     end
                 end
 
-                % Fire callback for real-time plotting
-                obj.fireCallback(k, rnConv);
+                detail = obj.buildFailureReport(ME, stage, iter, r, w, eqNames);
+                obj.log('%s', detail);
+                fprintf(2, '%s\n', detail);
 
-
-
-                if k == obj.maxIter
-                    finalR = norm(r);
-                    finalRW = norm(w .* r);
-                    obj.converged = false;
-                    obj.exitFlag = "max_iter_nonconverged";
-                    obj.finalResidual = finalR;
-                    obj.finalWeightedResidual = finalRW;
-                    obj.residualHistory(end+1) = finalR;
-                    obj.weightedResidualHistory(end+1) = finalRW;
-                    obj.stepHistory(end+1) = NaN;
-                    obj.alphaHistory(end+1) = NaN;
-                    obj.log('Max iterations reached: non-converged iterate; balances not satisfied. Final ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', finalR, finalRW, obj.residualEvalCount);
-                    if obj.useWeightedNormForConvergence
-                        obj.fireCallback(k+1, finalRW);
-                    else
-                        obj.fireCallback(k+1, finalR);
-                    end
-                    warning('Max iterations reached: non-converged iterate; balances not satisfied. Final ||r||=%.6e, ||W*r||=%.6e', finalR, finalRW);
-                end
+                enriched = MException('ProcessSolver:DetailedFailure', '%s', detail);
+                enriched = addCause(enriched, ME);
+                throwAsCaller(enriched);
             end
-
-            if dbg.level >= 2
-                obj.debugPrintTopResiduals(r, dbg, eqNames, 'solver exit');
-                obj.debugPrintMixerCompositionConsistency(r, dbg, 'solver exit');
-            end
-
-            if ~obj.printToConsole && ~isempty(obj.logLines)
-                fprintf('%s\n', obj.logLines(end));
-            end
-
-            obj.unpackUnknowns(x);
         end
 
         function T = streamTable(obj)
@@ -599,7 +674,7 @@ classdef ProcessSolver < handle
             end
         end
 
-        function [accepted, x_new, r_new, alpha, bt, stagnationReject] = backtrackingLineSearch(obj, x, dx, rnW, w)
+        function [accepted, x_new, r_new, alpha, bt, stagnationReject] = backtrackingLineSearch(obj, x, dx, rnU, rnW, w)
             alpha = obj.damping;
             bt = 0;
             accepted = false;
@@ -609,22 +684,27 @@ classdef ProcessSolver < handle
 
             decreaseTol = 1e-8;
             noiseTol = 1e-14;
-            strictTarget = rnW * (1 - decreaseTol);
+            strictTargetW = rnW * (1 - decreaseTol);
+            strictTargetU = rnU * (1 - decreaseTol);
             flatSeen = false;
 
             while bt < 30
                 xCand = x + alpha*dx;
                 [rCand, okCand] = obj.tryResiduals(xCand);
                 if okCand
+                    rnUCand = norm(rCand);
                     rnWCand = norm(w .* rCand);
-                    if rnWCand <= strictTarget
+                    % Accept only if BOTH weighted and unweighted norms
+                    % strictly decrease. This prevents auto-scale weights
+                    % from hiding growth in physical (unweighted) residuals.
+                    if rnWCand <= strictTargetW && rnUCand <= strictTargetU
                         accepted = true;
                         x_new = xCand;
                         r_new = rCand;
                         return
                     end
 
-                    if rnWCand <= rnW * (1 + noiseTol)
+                    if rnWCand <= rnW * (1 + noiseTol) || rnUCand <= rnU * (1 + noiseTol)
                         flatSeen = true;
                     end
                 end
@@ -683,6 +763,13 @@ classdef ProcessSolver < handle
                     mag = abs(r0(min(i, numel(r0))));
                     w(i) = 1 / max(mag, obj.autoScaleMinMagnitude);
                 end
+
+                % Cap dynamic range so one tiny initial residual cannot
+                % dominate the weighted merit function and mislead line
+                % search acceptance.
+                wMin = min(w);
+                wMax = wMin * max(1, obj.autoScaleMaxWeightFactor);
+                w = min(w, wMax);
             else
                 w = ones(nEq,1) / max(obj.defaultResidualScale, eps);
                 for i = 1:nEq
@@ -986,6 +1073,182 @@ classdef ProcessSolver < handle
                 fprintf(dbg.out, '      n_dot=%.6e, sum(n_dot*y)=%.6e, diff=%+.3e\n', ...
                     s.n_dot, compFlowSum, diffFlow);
             end
+        end
+
+        function issues = detectKnownSpecConflicts(obj)
+            issues = strings(0,1);
+            for u = 1:numel(obj.units)
+                unit = obj.units{u};
+                uName = string(class(unit));
+                if ismethod(unit, 'describe')
+                    try
+                        uName = string(unit.describe());
+                    catch
+                        uName = string(class(unit));
+                    end
+                end
+
+                if isprop(unit, 'inlet') && isprop(unit, 'outlet')
+                    sIn = unit.inlet;
+                    sOut = unit.outlet;
+
+                    if obj.isKnownFlagTrue(sIn, 'T') && obj.isKnownFlagTrue(sOut, 'T')
+                        if abs(sOut.T - sIn.T) > 1e-9
+                            issues(end+1,1) = sprintf('%s has both inlet/outlet T marked Known but T_out-T_in=%+.3e K.', uName, sOut.T - sIn.T);
+                        end
+                    end
+                    if obj.isKnownFlagTrue(sIn, 'P') && obj.isKnownFlagTrue(sOut, 'P')
+                        if abs(sOut.P - sIn.P) > 1e-6
+                            issues(end+1,1) = sprintf('%s has both inlet/outlet P marked Known but P_out-P_in=%+.3e Pa.', uName, sOut.P - sIn.P);
+                        end
+                    end
+                end
+
+                if isprop(unit, 'Tout') && isfinite(unit.Tout) && isprop(unit, 'outlet')
+                    sOut = unit.outlet;
+                    if obj.isKnownFlagTrue(sOut, 'T') && abs(sOut.T - unit.Tout) > 1e-9
+                        issues(end+1,1) = sprintf('%s Tout=%.6g K conflicts with Known outlet T=%.6g K on stream %s.', ...
+                            uName, unit.Tout, sOut.T, string(sOut.name));
+                    end
+                end
+
+                if isprop(unit, 'Pout') && isfinite(unit.Pout) && isprop(unit, 'outlet')
+                    sOut = unit.outlet;
+                    if obj.isKnownFlagTrue(sOut, 'P') && abs(sOut.P - unit.Pout) > 1e-6
+                        issues(end+1,1) = sprintf('%s Pout=%.6g Pa conflicts with Known outlet P=%.6g Pa on stream %s.', ...
+                            uName, unit.Pout, sOut.P, string(sOut.name));
+                    end
+                end
+            end
+        end
+
+        function tf = isKnownFlagTrue(~, s, field)
+            tf = false;
+            if ~(isprop(s,'known') && isstruct(s.known) && isfield(s.known, field))
+                return
+            end
+            v = s.known.(field);
+            tf = islogical(v) && isscalar(v) && v;
+        end
+
+        function checkInitialJacobianConnectivity(obj, x, r0)
+            if isempty(x)
+                return
+            end
+
+            J0 = obj.fdJacobianSafe(x, r0);
+            colNormInf = max(abs(J0), [], 1);
+            dead = find(colNormInf <= obj.jacobianDeadColumnTol | ~isfinite(colNormInf));
+            if isempty(dead)
+                return
+            end
+
+            msgLines = strings(numel(dead),1);
+            for i = 1:numel(dead)
+                k = dead(i);
+                msgLines(i) = obj.describeUnknown(obj.map(k));
+                obj.log('Jacobian dead-column candidate: x(%d) %s (||J(:,k)||_inf=%.3e)', ...
+                    k, msgLines(i), colNormInf(k));
+            end
+
+            msg = sprintf(['Detected %d unknown(s) with near-zero initial Jacobian columns. ' ...
+                'This indicates disconnected DOFs, conflicting constraints, or numerically flat equations.'], numel(dead));
+            if obj.failOnJacobianDeadColumns
+                error('%s Unknown(s): %s', msg, strjoin(cellstr(msgLines), '; '));
+            else
+                warning('%s Unknown(s): %s', msg, strjoin(cellstr(msgLines), '; '));
+            end
+        end
+
+        function txt = describeUnknown(~, m)
+            if strcmp(m.var, 'u')
+                txt = sprintf('[unit %d] manipulated %s.%s', m.unitIndex, class(m.owner), m.field);
+                return
+            end
+
+            si = m.streamIndex;
+            switch m.var
+                case 'z'
+                    txt = sprintf('[stream %d] n_dot(log)', si);
+                case 'a'
+                    txt = sprintf('[stream %d] composition logit comp=%d', si, m.subIndex);
+                case 'T'
+                    txt = sprintf('[stream %d] temperature', si);
+                case 'P'
+                    txt = sprintf('[stream %d] pressure', si);
+                otherwise
+                    txt = sprintf('[stream %d] var=%s', si, m.var);
+            end
+        end
+
+        function detail = buildFailureReport(obj, ME, stage, iter, r, w, eqNames)
+            header = "HERE IS WHAT HAPPENED";
+            lines = strings(0,1);
+            lines(end+1,1) = header;
+            lines(end+1,1) = string(repmat('=', 1, strlength(header)));
+            lines(end+1,1) = sprintf('Failure stage: %s', stage);
+            lines(end+1,1) = sprintf('Iteration: %d', iter);
+            lines(end+1,1) = sprintf('Reason: %s', string(ME.message));
+            lines(end+1,1) = sprintf('Residual evaluations: %d', obj.residualEvalCount);
+
+            if ~isempty(ME.stack)
+                lines(end+1,1) = 'Stack trace (most recent first):';
+                nStack = min(6, numel(ME.stack));
+                for i = 1:nStack
+                    st = ME.stack(i);
+                    lines(end+1,1) = sprintf('  at %s (line %d)', string(st.name), st.line);
+                end
+            end
+
+            if ~isempty(r)
+                ru = norm(r);
+                if ~isempty(w)
+                    rw = norm(w .* r);
+                else
+                    rw = ru;
+                end
+                lines(end+1,1) = sprintf('Residual norms: ||r||=%.6e, ||W*r||=%.6e', ru, rw);
+                lines(end+1,1) = obj.summarizeTopResiduals(r, eqNames, 10);
+            else
+                lines(end+1,1) = 'Residual norms: unavailable (failure occurred before initial residual evaluation).';
+            end
+
+            lines(end+1,1) = 'Recent solver log lines:';
+            nLog = numel(obj.logLines);
+            nTail = min(12, nLog);
+            if nTail == 0
+                lines(end+1,1) = '  (none)';
+            else
+                for i = nLog-nTail+1:nLog
+                    lines(end+1,1) = "  - " + obj.logLines(i);
+                end
+            end
+
+            detail = strjoin(lines, newline);
+        end
+
+        function txt = summarizeTopResiduals(~, r, eqNames, topN)
+            if nargin < 4 || isempty(topN)
+                topN = 10;
+            end
+            n = min([numel(r), max(1, topN)]);
+            if n == 0
+                txt = 'Top residuals: none.';
+                return
+            end
+
+            [~, order] = sort(abs(r), 'descend');
+            idx = order(1:n);
+            parts = strings(n,1);
+            for i = 1:n
+                k = idx(i);
+                label = sprintf('eq %d', k);
+                if k <= numel(eqNames) && strlength(eqNames(k)) > 0
+                    label = char(eqNames(k));
+                end
+                parts(i) = sprintf('[%d] %s = %+.3e', k, label, r(k));
+            end
+            txt = "Top residuals: " + strjoin(parts, '; ');
         end
 
         function [dominantMixer, eqIdx, eqVal] = findDominantMixer(obj, r)
