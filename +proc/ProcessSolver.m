@@ -24,6 +24,11 @@ classdef ProcessSolver < handle
         pressureResidualScale = 1
         useWeightedNormForConvergence logical = true
 
+        % Auto-scale: derive per-equation weights from initial residual
+        % magnitudes so that all equations contribute equally to the norm.
+        autoScale logical = false
+        autoScaleMinMagnitude double = 1e-6
+
         % Jacobian refresh trigger when convergence stalls
         stallRatioThreshold = 0.9
         stallIterWindow = 3
@@ -60,6 +65,12 @@ classdef ProcessSolver < handle
 
         % Runtime counter (including line-search and FD probes)
         residualEvalCount double = 0
+
+        % Explicit solve status (updated at solve() exit)
+        converged logical = false
+        exitFlag string = "not_run"
+        finalResidual double = NaN
+        finalWeightedResidual double = NaN
 
         % Optional callback: called each iteration as iterCallback(iter, rNorm)
         % Set this before calling solve() to get real-time updates.
@@ -101,6 +112,11 @@ classdef ProcessSolver < handle
             obj.applySolverSettingsStruct();
             dbg = obj.resolveDebugOptions();
 
+            obj.converged = false;
+            obj.exitFlag = "running";
+            obj.finalResidual = NaN;
+            obj.finalWeightedResidual = NaN;
+
             obj.logLines = strings(0,1);
             obj.residualHistory = [];
             obj.weightedResidualHistory = [];
@@ -127,7 +143,11 @@ classdef ProcessSolver < handle
             if ~ok
                 error('Initial residual returned NaN/Inf. Check initial guesses (n_dot,y,T,P).');
             end
-            w = obj.buildEquationWeights(eqNames, numel(r));
+            w = obj.buildEquationWeights(eqNames, numel(r), r);
+            if obj.autoScale
+                obj.log('Auto-scaling enabled: weights derived from initial |r| (minMag=%.1e, wRange=[%.2e, %.2e])', ...
+                    obj.autoScaleMinMagnitude, min(w), max(w));
+            end
             r0u = norm(r);
             r0w = norm(w .* r);
             obj.residualHistory(end+1) = r0u;
@@ -161,6 +181,10 @@ classdef ProcessSolver < handle
                     obj.weightedResidualHistory(end+1) = rnW;
                     obj.stepHistory(end+1)     = 0;
                     obj.alphaHistory(end+1)    = 0;
+                    obj.converged = true;
+                    obj.exitFlag = "converged";
+                    obj.finalResidual = rnU;
+                    obj.finalWeightedResidual = rnW;
                     obj.log('Converged at iter %d: ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', k, rnU, rnW, obj.residualEvalCount);
                     obj.fireCallback(k, rnConv);
                     break
@@ -181,8 +205,12 @@ classdef ProcessSolver < handle
                     error('dx contains NaN/Inf. Model may be ill-conditioned.');
                 end
 
-                [accepted, x_new, r_new, alpha, bt] = obj.backtrackingLineSearch(x, dx, rnW, w);
+                [accepted, x_new, r_new, alpha, bt, stagnationReject] = obj.backtrackingLineSearch(x, dx, rnW, w);
                 if ~accepted
+                    if stagnationReject
+                        obj.log('Iter %3d: stagnation reject (no strict ||W*r|| decrease found in line search).', k);
+                    end
+
                     % Fallback: discard reused/Broyden Jacobian and retry with
                     % a fresh finite-difference Jacobian at the current state.
                     J  = obj.fdJacobianSafe(x, r);
@@ -190,7 +218,11 @@ classdef ProcessSolver < handle
                     forceFD = false;
 
                     dx = obj.solveLinearLM(J, -r, w);
-                    [accepted, x_new, r_new, alpha, bt] = obj.backtrackingLineSearch(x, dx, rnW, w);
+                    [accepted, x_new, r_new, alpha, bt, stagnationReject] = obj.backtrackingLineSearch(x, dx, rnW, w);
+
+                    if ~accepted && stagnationReject
+                        obj.log('Iter %3d: stagnation reject persisted after FD retry.', k);
+                    end
 
                     if ~accepted
                         error('Line search failed at iteration %d.', k);
@@ -260,17 +292,21 @@ classdef ProcessSolver < handle
                 if k == obj.maxIter
                     finalR = norm(r);
                     finalRW = norm(w .* r);
+                    obj.converged = false;
+                    obj.exitFlag = "max_iter_nonconverged";
+                    obj.finalResidual = finalR;
+                    obj.finalWeightedResidual = finalRW;
                     obj.residualHistory(end+1) = finalR;
                     obj.weightedResidualHistory(end+1) = finalRW;
                     obj.stepHistory(end+1) = NaN;
                     obj.alphaHistory(end+1) = NaN;
-                    obj.log('Max iterations reached. Final ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', finalR, finalRW, obj.residualEvalCount);
+                    obj.log('Max iterations reached: non-converged iterate; balances not satisfied. Final ||r||=%.6e, ||W*r||=%.6e (resEvals=%d)', finalR, finalRW, obj.residualEvalCount);
                     if obj.useWeightedNormForConvergence
                         obj.fireCallback(k+1, finalRW);
                     else
                         obj.fireCallback(k+1, finalR);
                     end
-                    warning('Max iterations reached. Final ||r||=%.6e, ||W*r||=%.6e', finalR, finalRW);
+                    warning('Max iterations reached: non-converged iterate; balances not satisfied. Final ||r||=%.6e, ||W*r||=%.6e', finalR, finalRW);
                 end
             end
 
@@ -287,6 +323,12 @@ classdef ProcessSolver < handle
         end
 
         function T = streamTable(obj)
+            if ~obj.converged
+                error('ProcessSolver:NonConvergedResults', ...
+                    'Cannot present streamTable as final results: non-converged iterate; balances not satisfied. exitFlag=%s, finalResidual=%.6e, finalWeightedResidual=%.6e', ...
+                    char(obj.exitFlag), obj.finalResidual, obj.finalWeightedResidual);
+            end
+
             N = numel(obj.streams);
             names = strings(N,1); n_dot = nan(N,1);
             TT = nan(N,1); PP = nan(N,1); Y = nan(N,obj.ns);
@@ -300,6 +342,39 @@ classdef ProcessSolver < handle
             for j = 1:obj.ns
                 T.(sprintf('y_%s', obj.streams{1}.species{j})) = Y(:,j);
             end
+        end
+
+        function S = localStabilityProxy(obj)
+            %LOCALSTABILITYPROXY Estimate local poles from residual Jacobian.
+            %
+            % Interprets the steady-state residual as pseudo-dynamics:
+            %    dx/dt = -r(x)
+            % Then the linearized state matrix at the current operating
+            % point is A = -dr/dx = -J. Poles are eig(A).
+            %
+            % This is a local stability proxy for diagnostics/teaching,
+            % not a substitute for full dynamic model linearization.
+
+            [x, map] = obj.packUnknowns();
+            [r, ok] = obj.tryResiduals(x);
+            if ~ok
+                error('Cannot compute stability proxy: residual contains NaN/Inf at current state.');
+            end
+
+            J = obj.fdJacobianSafe(x, r);
+            A = -J;
+            poles = eig(A);
+
+            S = struct();
+            S.J = J;
+            S.A = A;
+            S.poles = poles;
+            S.maxReal = max(real(poles));
+            S.minReal = min(real(poles));
+            S.stable = all(real(poles) < 0);
+            S.nUnknowns = numel(x);
+            S.nEquations = numel(r);
+            S.map = map;
         end
     end
 
@@ -524,21 +599,34 @@ classdef ProcessSolver < handle
             end
         end
 
-        function [accepted, x_new, r_new, alpha, bt] = backtrackingLineSearch(obj, x, dx, rnW, w)
+        function [accepted, x_new, r_new, alpha, bt, stagnationReject] = backtrackingLineSearch(obj, x, dx, rnW, w)
             alpha = obj.damping;
             bt = 0;
             accepted = false;
+            stagnationReject = false;
             x_new = x;
             r_new = nan(size(dx));
+
+            decreaseTol = 1e-8;
+            noiseTol = 1e-14;
+            strictTarget = rnW * (1 - decreaseTol);
+            flatSeen = false;
 
             while bt < 30
                 xCand = x + alpha*dx;
                 [rCand, okCand] = obj.tryResiduals(xCand);
-                if okCand && norm(w .* rCand) <= rnW
-                    accepted = true;
-                    x_new = xCand;
-                    r_new = rCand;
-                    return
+                if okCand
+                    rnWCand = norm(w .* rCand);
+                    if rnWCand <= strictTarget
+                        accepted = true;
+                        x_new = xCand;
+                        r_new = rCand;
+                        return
+                    end
+
+                    if rnWCand <= rnW * (1 + noiseTol)
+                        flatSeen = true;
+                    end
                 end
                 alpha = alpha * 0.5;
                 bt = bt + 1;
@@ -546,6 +634,8 @@ classdef ProcessSolver < handle
                     break;
                 end
             end
+
+            stagnationReject = flatSeen;
         end
 
         function dx = solveLinearLM(~, J, b, w)
@@ -575,8 +665,25 @@ classdef ProcessSolver < handle
             end
         end
 
-        function w = buildEquationWeights(obj, eqNames, nEq)
-            if isempty(obj.equationWeights)
+        function w = buildEquationWeights(obj, eqNames, nEq, r0)
+            if ~isempty(obj.equationWeights)
+                ew = obj.equationWeights(:);
+                if isscalar(ew)
+                    w = repmat(ew, nEq, 1);
+                elseif numel(ew) == nEq
+                    w = ew;
+                else
+                    error('equationWeights must be scalar or length %d.', nEq);
+                end
+            elseif obj.autoScale && nargin >= 4 && ~isempty(r0)
+                % Derive per-equation weights from initial residual
+                % magnitudes so that all equations contribute equally.
+                w = ones(nEq, 1);
+                for i = 1:nEq
+                    mag = abs(r0(min(i, numel(r0))));
+                    w(i) = 1 / max(mag, obj.autoScaleMinMagnitude);
+                end
+            else
                 w = ones(nEq,1) / max(obj.defaultResidualScale, eps);
                 for i = 1:nEq
                     lbl = lower(char(eqNames(min(i, numel(eqNames)))));
@@ -587,15 +694,6 @@ classdef ProcessSolver < handle
                     elseif contains(lbl, 'flow') || contains(lbl, 'mass') || contains(lbl, 'mole') || contains(lbl, 'n_dot')
                         w(i) = 1 / max(obj.flowResidualScale, eps);
                     end
-                end
-            else
-                ew = obj.equationWeights(:);
-                if isscalar(ew)
-                    w = repmat(ew, nEq, 1);
-                elseif numel(ew) == nEq
-                    w = ew;
-                else
-                    error('equationWeights must be scalar or length %d.', nEq);
                 end
             end
             w(~isfinite(w) | w <= 0) = 1;
