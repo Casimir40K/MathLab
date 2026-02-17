@@ -25,10 +25,13 @@ outFile = 'smr_ccs_pfd_test_config.mat';
 fprintf('Generating test config: %s\n', outFile);
 
 %% Species
-cfg.speciesNames = {'CH4eq','CO','CO2','H2O','H2','N2'};
+% NOTE:
+%   Use CH4 (not CH4eq) so thermo-dependent units in MathLabApp can
+%   instantiate their mixture model when this config is loaded in the GUI.
+cfg.speciesNames = {'CH4','CO','CO2','H2O','H2','N2'};
 cfg.speciesMW    = [16.04, 28.01, 44.01, 18.015, 2.016, 28.014];
 
-ix.CH4eq = 1; ix.CO = 2; ix.CO2 = 3; ix.H2O = 4; ix.H2 = 5; ix.N2 = 6;
+ix.CH4 = 1; ix.CO = 2; ix.CO2 = 3; ix.H2O = 4; ix.H2 = 5; ix.N2 = 6;
 ns = numel(cfg.speciesNames);
 
 %% Feed + utility basis from assumptions
@@ -144,8 +147,8 @@ u.outlet = 'S06_heated_reformer_in';
 u.Tout = 1120;
 unitDefs{end+1} = u;
 
-% U5 SMR reactor: CH4eq + H2O -> CO + 3H2 (X=0.80)
-rxn1.reactants = [ix.CH4eq ix.H2O];
+% U5 SMR reactor: CH4 + H2O -> CO + 3H2 (X=0.80)
+rxn1.reactants = [ix.CH4 ix.H2O];
 rxn1.products  = [ix.CO ix.H2];
 rxn1.stoich    = [-1 1 0 -1 3 0];
 rxn1.name      = "SMR";
