@@ -28,6 +28,7 @@ classdef ProcessSolver < handle
         % magnitudes so that all equations contribute equally to the norm.
         autoScale logical = false
         autoScaleMinMagnitude double = 1e-6
+        autoScaleMaxWeightFactor double = 1e3
 
         % Jacobian refresh trigger when convergence stalls
         stallRatioThreshold = 0.9
@@ -249,7 +250,7 @@ classdef ProcessSolver < handle
                     end
 
                     stage = sprintf('iter_%d_line_search', k);
-                    [accepted, x_new, r_new, alpha, bt, stagnationReject] = obj.backtrackingLineSearch(x, dx, rnW, w);
+                [accepted, x_new, r_new, alpha, bt, stagnationReject] = obj.backtrackingLineSearch(x, dx, rnU, rnW, w);
                     if ~accepted
                         if stagnationReject
                             obj.log('Iter %3d: stagnation reject (no strict ||W*r|| decrease found in line search).', k);
@@ -266,7 +267,7 @@ classdef ProcessSolver < handle
                         dx = obj.solveLinearLM(J, -r, w);
 
                         stage = sprintf('iter_%d_line_search_retry', k);
-                        [accepted, x_new, r_new, alpha, bt, stagnationReject] = obj.backtrackingLineSearch(x, dx, rnW, w);
+                        [accepted, x_new, r_new, alpha, bt, stagnationReject] = obj.backtrackingLineSearch(x, dx, rnU, rnW, w);
 
                         if ~accepted && stagnationReject
                             obj.log('Iter %3d: stagnation reject persisted after FD retry.', k);
@@ -673,7 +674,7 @@ classdef ProcessSolver < handle
             end
         end
 
-        function [accepted, x_new, r_new, alpha, bt, stagnationReject] = backtrackingLineSearch(obj, x, dx, rnW, w)
+        function [accepted, x_new, r_new, alpha, bt, stagnationReject] = backtrackingLineSearch(obj, x, dx, rnU, rnW, w)
             alpha = obj.damping;
             bt = 0;
             accepted = false;
@@ -683,22 +684,27 @@ classdef ProcessSolver < handle
 
             decreaseTol = 1e-8;
             noiseTol = 1e-14;
-            strictTarget = rnW * (1 - decreaseTol);
+            strictTargetW = rnW * (1 - decreaseTol);
+            strictTargetU = rnU * (1 - decreaseTol);
             flatSeen = false;
 
             while bt < 30
                 xCand = x + alpha*dx;
                 [rCand, okCand] = obj.tryResiduals(xCand);
                 if okCand
+                    rnUCand = norm(rCand);
                     rnWCand = norm(w .* rCand);
-                    if rnWCand <= strictTarget
+                    % Accept only if BOTH weighted and unweighted norms
+                    % strictly decrease. This prevents auto-scale weights
+                    % from hiding growth in physical (unweighted) residuals.
+                    if rnWCand <= strictTargetW && rnUCand <= strictTargetU
                         accepted = true;
                         x_new = xCand;
                         r_new = rCand;
                         return
                     end
 
-                    if rnWCand <= rnW * (1 + noiseTol)
+                    if rnWCand <= rnW * (1 + noiseTol) || rnUCand <= rnU * (1 + noiseTol)
                         flatSeen = true;
                     end
                 end
@@ -757,6 +763,13 @@ classdef ProcessSolver < handle
                     mag = abs(r0(min(i, numel(r0))));
                     w(i) = 1 / max(mag, obj.autoScaleMinMagnitude);
                 end
+
+                % Cap dynamic range so one tiny initial residual cannot
+                % dominate the weighted merit function and mislead line
+                % search acceptance.
+                wMin = min(w);
+                wMax = wMin * max(1, obj.autoScaleMaxWeightFactor);
+                w = min(w, wMax);
             else
                 w = ones(nEq,1) / max(obj.defaultResidualScale, eps);
                 for i = 1:nEq
