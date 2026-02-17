@@ -610,14 +610,14 @@ classdef MathLabApp < handle
         function buildResultsTab(app)
             t = uitab(app.Tabs, 'Title', ' Results - Trends ');
             app.ResultsTab = t;
-            gl = uigridlayout(t, [1 2], 'ColumnWidth',{380,'1x'}, ...
-                'Padding',[10 10 10 10], 'ColumnSpacing',8);
+            gl = uigridlayout(t, [1 2], 'ColumnWidth',{420,'1x'}, ...
+                'Padding',[8 8 8 8], 'ColumnSpacing',6);
 
             ctrlP = uipanel(gl, 'Title','Trend Controls', 'FontWeight','bold');
             ctrlP.Layout.Column = 1;
             cg = uigridlayout(ctrlP, [8 1], ...
-                'RowHeight',{80,80,80,80,28,28,28,'1x'}, ...
-                'Padding',[6 6 6 6], 'RowSpacing',4);
+                'RowHeight',{66,66,66,66,26,26,26,'1x'}, ...
+                'Padding',[4 4 4 4], 'RowSpacing',3);
 
             app.buildTraceRow(cg, 1, 'flow', 'left');
             app.buildTraceRow(cg, 2, 'T', 'right');
@@ -632,7 +632,7 @@ classdef MathLabApp < handle
             app.ResultsSmoothingDD = uidropdown(row5, 'Items',{'none','moving-average','median'}, 'Value','none', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             app.ResultsSmoothWindowField = uieditfield(row5, 'numeric', 'Value',3, 'Limits',[1 999], 'RoundFractionalValues','on', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
 
-            row6 = uigridlayout(cg,[1 8],'ColumnWidth',{'fit',85,'fit',85,'fit',80,'fit','1x'},'Padding',[0 0 0 0]);
+            row6 = uigridlayout(cg,[1 8],'ColumnWidth',{'fit',90,'fit',90,'fit',90,'fit','1x'},'Padding',[0 0 0 0]);
             uilabel(row6,'Text','Norm','FontWeight','bold');
             app.ResultsNormModeDD = uidropdown(row6, 'Items',{'absolute','normalized'}, 'Value','absolute', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             uilabel(row6,'Text','Legend','FontWeight','bold');
@@ -668,7 +668,7 @@ classdef MathLabApp < handle
             varsY = varsAll(2:end);
             traceColors = {[0.00 0.45 0.74],[0.85 0.33 0.10],[0.47 0.67 0.19],[0.49 0.18 0.56]};
             p = uipanel(parent, 'Title', sprintf('Trace %d', idx));
-            g = uigridlayout(p,[2 6],'ColumnWidth',{'fit',90,'fit',90,50,'1x'},'RowHeight',{24,24},'Padding',[4 4 4 4],'RowSpacing',2);
+            g = uigridlayout(p,[2 6],'ColumnWidth',{'fit',90,'fit',90,50,'1x'},'RowHeight',{22,22},'Padding',[2 2 2 2],'RowSpacing',1);
             uilabel(g,'Text','Y','FontWeight','bold','FontColor',traceColors{idx});
             app.(['ResultsConfig' num2str(idx) 'YVarDD']) = uidropdown(g, 'Items',varsY, 'Value',yDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
             uilabel(g,'Text','Axis','FontWeight','bold');
@@ -702,8 +702,10 @@ classdef MathLabApp < handle
         function buildResultsStabilityTab(app)
             t = uitab(app.Tabs, 'Title', ' Results - Stability ');
             app.ResultsStabilityTab = t;
-            gl = uigridlayout(t, [3 4], 'RowHeight',{28,34,'1x'}, ...
+            gl = uigridlayout(t, [4 4], 'RowHeight',{28,34,48,'1x'}, ...
                 'ColumnWidth',{'fit','1x','fit','1x'}, 'Padding',[12 12 12 12], 'ColumnSpacing',8, 'RowSpacing',6);
+
+            % --- Row 1: Controls ---
             uilabel(gl,'Text','Sweep parameter','FontWeight','bold');
             app.ResultsStabilitySweepParamDD = uidropdown(gl, 'Items',{'none','Reactor conversion','Purge beta','Separator phi(1)'}, 'Value','none');
             uilabel(gl,'Text','min/max/pts','FontWeight','bold');
@@ -712,20 +714,39 @@ classdef MathLabApp < handle
             app.ResultsStabilitySweepMaxField = uieditfield(sweepRangeG, 'numeric', 'Value',0.9);
             app.ResultsStabilitySweepPtsField = uieditfield(sweepRangeG, 'numeric', 'Value',11, 'Limits',[2 200], 'RoundFractionalValues','on');
             app.ResultsStabilitySweepPtsField.Layout.Column = 3;
+
+            % --- Row 2: Run button + status ---
             app.ResultsStabilityBtn = uibutton(gl, 'push', 'Text','Run Stability Analysis', ...
                 'FontWeight','bold', 'BackgroundColor',[0.93 0.88 0.99], 'ButtonPushedFcn',@(~,~) app.updateStabilityAnalysisTab());
             app.ResultsStabilityBtn.Layout.Column = [1 2];
             app.ResultsStabilityStatusLabel = uilabel(gl, 'Text','Run solve first, then run stability analysis.', 'FontColor',[0.35 0.35 0.35]);
             app.ResultsStabilityStatusLabel.Layout.Column = [3 4];
 
-            p1 = uipanel(gl, 'Title','Nyquist Diagram (Characteristic Loci via Laplace Transform)', 'FontWeight','bold');
-            p1.Layout.Row = 3; p1.Layout.Column = [1 2];
+            % --- Row 3: Explainer / legend bar ---
+            infoG = uigridlayout(gl,[1 2],'ColumnWidth',{'1x','1x'},'Padding',[0 0 0 0],'ColumnSpacing',8);
+            infoG.Layout.Row = 3; infoG.Layout.Column = [1 4];
+            nyqInfo = uilabel(infoG, 'Text', ...
+                ['Nyquist (left): Plots eigenvalues of the resolvent L(j\omega) = (j\omega I - A)^{-1}. ' ...
+                 'Solid = +\omega, dashed = -\omega. Red x marks the critical point (-1+0j). ' ...
+                 'Encirclements of the origin indicate instability.'], ...
+                'FontSize',11, 'FontColor',[0.35 0.35 0.40], 'WordWrap','on');
+            nyqInfo.Layout.Column = 1;
+            poleInfo = uilabel(infoG, 'Text', ...
+                ['Pole Map (right): Shows eigenvalues of the Jacobian A. ' ...
+                 'Blue x = stable poles (Re < 0), red x = unstable poles (Re >= 0). ' ...
+                 'If sweep is set, plots max Re(pole) vs parameter -- below zero means stable.'], ...
+                'FontSize',11, 'FontColor',[0.35 0.35 0.40], 'WordWrap','on');
+            poleInfo.Layout.Column = 2;
+
+            % --- Row 4: Plots ---
+            p1 = uipanel(gl, 'Title','Nyquist Diagram (Characteristic Loci)', 'FontWeight','bold');
+            p1.Layout.Row = 4; p1.Layout.Column = [1 2];
             g1 = uigridlayout(p1,[1 1],'Padding',[4 4 4 4]);
             app.ResultsNyquistAxes = uiaxes(g1);
-            grid(app.ResultsNyquistAxes,'on'); xlabel(app.ResultsNyquistAxes,'Re'); ylabel(app.ResultsNyquistAxes,'Im');
+            grid(app.ResultsNyquistAxes,'on'); xlabel(app.ResultsNyquistAxes,'Re(\lambda)'); ylabel(app.ResultsNyquistAxes,'Im(\lambda)');
 
             p2 = uipanel(gl, 'Title','Pole Map & Stability Sweep', 'FontWeight','bold');
-            p2.Layout.Row = 3; p2.Layout.Column = [3 4];
+            p2.Layout.Row = 4; p2.Layout.Column = [3 4];
             g2 = uigridlayout(p2,[1 1],'Padding',[4 4 4 4]);
             app.ResultsStabilitySweepAxes = uiaxes(g2);
             grid(app.ResultsStabilitySweepAxes,'on'); xlabel(app.ResultsStabilitySweepAxes,'Re(pole)'); ylabel(app.ResultsStabilitySweepAxes,'Im(pole)');
@@ -3027,15 +3048,11 @@ classdef MathLabApp < handle
                     plot(app.ResultsNyquistAxes, -1, 0, 'rx', 'MarkerSize',9, 'LineWidth',1.8, 'DisplayName','-1+0j');
                     % Unit circle for reference
                     th = linspace(0,2*pi,100);
-                    plot(app.ResultsNyquistAxes, cos(th), sin(th), ':', 'Color',[0.7 0.7 0.7], 'HandleVisibility','off');
+                    plot(app.ResultsNyquistAxes, cos(th), sin(th), ':', 'Color',[0.7 0.7 0.7], 'DisplayName','Unit circle');
                     grid(app.ResultsNyquistAxes,'on');
                     xlabel(app.ResultsNyquistAxes,'Re(\lambda)');
                     ylabel(app.ResultsNyquistAxes,'Im(\lambda)');
-                    if nShow <= 6
-                        legend(app.ResultsNyquistAxes,'Location','best');
-                    else
-                        legend(app.ResultsNyquistAxes,'off');
-                    end
+                    legend(app.ResultsNyquistAxes,'Location','best','FontSize',8);
                     stableTxt = app.ternary(st.stable, 'STABLE', 'UNSTABLE');
                     title(app.ResultsNyquistAxes, sprintf('Generalised Nyquist | %s | max Re(pole)=%.3e', stableTxt, st.maxReal));
                     hold(app.ResultsNyquistAxes,'off');
@@ -3052,28 +3069,29 @@ classdef MathLabApp < handle
                         plot(app.ResultsStabilitySweepAxes, sweepData.values, sweepData.maxRealPole, '-o', ...
                             'LineWidth',1.4, 'Color',[0.85 0.33 0.10], 'MarkerSize',5, ...
                             'DisplayName','max Re(pole)');
-                        yline(app.ResultsStabilitySweepAxes, 0, '--r', 'LineWidth',1.0, 'HandleVisibility','off');
+                        yline(app.ResultsStabilitySweepAxes, 0, '--r', 'LineWidth',1.0, 'DisplayName','Stability boundary');
                         xlabel(app.ResultsStabilitySweepAxes, sprintf('Sweep: %s', sweepData.param));
                         ylabel(app.ResultsStabilitySweepAxes, 'max Re(pole)');
-                        title(app.ResultsStabilitySweepAxes, 'Stability Sweep');
-                        legend(app.ResultsStabilitySweepAxes,'Location','best');
+                        nUnstable = sum(sweepData.maxRealPole >= 0);
+                        title(app.ResultsStabilitySweepAxes, sprintf('Stability Sweep -- %d/%d pts unstable', nUnstable, numel(sweepData.values)));
+                        legend(app.ResultsStabilitySweepAxes,'Location','best','FontSize',9);
                     else
                         % Pole map of current operating point
                         stableIdx = real(poles) < 0;
                         if any(stableIdx)
                             plot(app.ResultsStabilitySweepAxes, real(poles(stableIdx)), imag(poles(stableIdx)), ...
-                                'bx', 'MarkerSize',8, 'LineWidth',1.5, 'DisplayName','Stable poles');
+                                'bx', 'MarkerSize',8, 'LineWidth',1.5, 'DisplayName',sprintf('Stable poles (Re<0) [%d]', sum(stableIdx)));
                         end
                         if any(~stableIdx)
                             plot(app.ResultsStabilitySweepAxes, real(poles(~stableIdx)), imag(poles(~stableIdx)), ...
-                                'rx', 'MarkerSize',10, 'LineWidth',2.0, 'DisplayName','Unstable poles');
+                                'rx', 'MarkerSize',10, 'LineWidth',2.0, 'DisplayName',sprintf('Unstable poles (Re>=0) [%d]', sum(~stableIdx)));
                         end
-                        xline(app.ResultsStabilitySweepAxes, 0, '--', 'Color',[0.5 0.5 0.5], 'HandleVisibility','off');
+                        xline(app.ResultsStabilitySweepAxes, 0, '--', 'Color',[0.5 0.5 0.5], 'DisplayName','Imaginary axis (stability boundary)');
                         yline(app.ResultsStabilitySweepAxes, 0, '--', 'Color',[0.5 0.5 0.5], 'HandleVisibility','off');
                         xlabel(app.ResultsStabilitySweepAxes, 'Re(pole)');
                         ylabel(app.ResultsStabilitySweepAxes, 'Im(pole)');
                         title(app.ResultsStabilitySweepAxes, sprintf('Pole Map (%d poles, %d stable)', n, sum(stableIdx)));
-                        legend(app.ResultsStabilitySweepAxes,'Location','best');
+                        legend(app.ResultsStabilitySweepAxes,'Location','best','FontSize',9);
                     end
                     grid(app.ResultsStabilitySweepAxes,'on');
                     hold(app.ResultsStabilitySweepAxes,'off');
