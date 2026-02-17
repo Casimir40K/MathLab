@@ -64,7 +64,7 @@ classdef Heater < handle
             Pspec = obj.resolvedOutletPressure();
             eqs(end+1) = obj.outlet.P - Pspec;
 
-            z_in = y_in.';
+            z_in = y_in.' / max(sum(y_in), eps);
 
             if isfinite(obj.Tout)
                 % Temperature spec: outlet T must equal Tout
@@ -82,36 +82,24 @@ classdef Heater < handle
         function labels = equationLabels(obj)
             ns = numel(obj.inlet.y);
             labels = strings(ns + 2, 1);
+            prefix = sprintf('Heater %s->%s', ...
+                string(obj.inlet.name), string(obj.outlet.name));
             for i = 1:ns
-                labels(i) = sprintf('Heater %s->%s residual(%d): n_out*y_out(%d) - n_in*y_in(%d)', ...
-                    string(obj.inlet.name), string(obj.outlet.name), i, i, i);
+                labels(i) = sprintf('%s: component %d mole flow', prefix, i);
             end
-            if isfinite(obj.dP)
-                pLabel = 'P_out - (P_in + dP)';
-            elseif isfinite(obj.Pout)
-                pLabel = 'P_out - P_spec';
-            elseif isfinite(obj.PR)
-                pLabel = 'P_out - PR*P_in';
-            else
-                pLabel = 'P_out - P_in';
-            end
-            labels(ns+1) = sprintf('Heater %s->%s residual(%d): %s', ...
-                string(obj.inlet.name), string(obj.outlet.name), ns+1, pLabel);
+            labels(ns+1) = sprintf('%s: pressure', prefix);
             if isfinite(obj.Tout)
-                labels(ns+2) = sprintf('Heater %s->%s residual(%d): T_out - T_spec', ...
-                    string(obj.inlet.name), string(obj.outlet.name), ns+2);
+                labels(ns+2) = sprintf('%s: temperature spec', prefix);
             elseif isfinite(obj.duty)
-                labels(ns+2) = sprintf('Heater %s->%s residual(%d): duty - n_in*(h_out-h_in)', ...
-                    string(obj.inlet.name), string(obj.outlet.name), ns+2);
+                labels(ns+2) = sprintf('%s: enthalpy balance', prefix);
             else
-                labels(ns+2) = sprintf('Heater %s->%s residual(%d): energy/temperature spec (unset)', ...
-                    string(obj.inlet.name), string(obj.outlet.name), ns+2);
+                labels(ns+2) = sprintf('%s: energy spec (unset)', prefix);
             end
         end
 
         function Q = getDuty(obj)
             %GETDUTY Compute duty [kW] from current stream states.
-            z = obj.inlet.y(:)';
+            z = obj.inlet.y(:)' / max(sum(obj.inlet.y), eps);
             h_in  = obj.thermoMix.h_mix_sensible(obj.inlet.T, z);
             h_out = obj.thermoMix.h_mix_sensible(obj.outlet.T, z);
             Q = obj.inlet.n_dot * (h_out - h_in);
