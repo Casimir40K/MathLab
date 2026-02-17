@@ -123,6 +123,14 @@ classdef MathLabApp < handle
         ResultsExportSnapshotsCsvBtn
         ResultsExportStreamCsvBtn
         ResultsExportUnitCsvBtn
+        ResultsStreamTable
+        ResultsUnitTable
+        ResultsTablesStatusLabel
+        ResultsNyquistAxes
+        ResultsStabilitySweepAxes
+        ResultsStabilityStatusLabel
+        ResultsExportStatusArea
+        ResultsExportAllCsvBtn
 
         % -- Tab 6: Sensitivity --
         SensTab
@@ -570,89 +578,48 @@ classdef MathLabApp < handle
         function buildResultsTab(app)
             t = uitab(app.Tabs, 'Title', ' Results - Trends ');
             app.ResultsTab = t;
-            gl = uigridlayout(t, [3 1], 'RowHeight',{150,56,'1x'}, ...
-                'Padding',[12 12 12 12], 'RowSpacing',8);
+            gl = uigridlayout(t, [1 2], 'ColumnWidth',{440,'1x'}, ...
+                'Padding',[12 12 12 12], 'ColumnSpacing',10);
 
-            varsAll = {'iteration','residual','flow','T','P','conversion','efficiency','duty','power','y(i)', ...
-                'deltaT_hx','power_specific','conversion_profile'};
-            varsY = varsAll(2:end);
-            headerItems = {'Trace','X','Y','Axis','Scale','Normalize','Comp','Target'};
+            ctrlP = uipanel(gl, 'Title','Trend Controls', 'FontWeight','bold');
+            ctrlP.Layout.Column = 1;
+            cg = uigridlayout(ctrlP, [8 1], ...
+                'RowHeight',{140,140,140,140,28,28,28,'1x'}, ...
+                'Padding',[8 8 8 8], 'RowSpacing',6);
 
-            topG = uigridlayout(gl, [5 8], 'ColumnWidth',{'fit',115,115,72,70,72,62,'1x'}, ...
-                'RowHeight',{22,26,26,26,26}, 'Padding',[0 0 0 0], 'ColumnSpacing',7, 'RowSpacing',4);
-            topG.Layout.Row = 1;
-            for c = 1:numel(headerItems)
-                uilabel(topG, 'Text', headerItems{c}, 'FontWeight','bold');
-            end
+            app.buildTraceRow(cg, 1, 'flow', 'left');
+            app.buildTraceRow(cg, 2, 'T', 'right');
+            app.buildTraceRow(cg, 3, 'residual', 'left');
+            app.buildTraceRow(cg, 4, 'power', 'right');
 
-            uilabel(topG, 'Text','Plot 1');
-            app.ResultsConfig1XVarDD = uidropdown(topG, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig1YVarDD = uidropdown(topG, 'Items',varsY, 'Value','flow', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig1AxisDD = uidropdown(topG, 'Items',{'left','right'}, 'Value','left', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig1ScaleField = uieditfield(topG, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig1NormCheck = uicheckbox(topG, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig1CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig1TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            row5 = uigridlayout(cg,[1 6],'ColumnWidth',{'fit',130,'fit',120,'fit','1x'},'Padding',[0 0 0 0]);
+            uilabel(row5,'Text','Preset','FontWeight','bold');
+            app.ResultsPresetDD = uidropdown(row5, 'Items',{'custom','convergence diagnostics','stream trajectories','unit performance'}, 'Value','custom');
+            app.ResultsApplyPresetBtn = uibutton(row5, 'push', 'Text','Apply', 'ButtonPushedFcn',@(~,~) app.applyResultsPreset());
+            uilabel(row5,'Text','Smoothing','FontWeight','bold');
+            app.ResultsSmoothingDD = uidropdown(row5, 'Items',{'none','moving-average','median'}, 'Value','none', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsSmoothWindowField = uieditfield(row5, 'numeric', 'Value',3, 'Limits',[1 999], 'RoundFractionalValues','on', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
 
-            uilabel(topG, 'Text','Plot 2');
-            app.ResultsConfig2XVarDD = uidropdown(topG, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig2YVarDD = uidropdown(topG, 'Items',varsY, 'Value','T', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig2AxisDD = uidropdown(topG, 'Items',{'left','right'}, 'Value','right', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig2ScaleField = uieditfield(topG, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig2NormCheck = uicheckbox(topG, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig2CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig2TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            row6 = uigridlayout(cg,[1 8],'ColumnWidth',{'fit',90,'fit',90,'fit',100,'fit','1x'},'Padding',[0 0 0 0]);
+            uilabel(row6,'Text','Norm','FontWeight','bold');
+            app.ResultsNormModeDD = uidropdown(row6, 'Items',{'absolute','normalized'}, 'Value','absolute', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            uilabel(row6,'Text','Legend','FontWeight','bold');
+            app.ResultsLegendDD = uidropdown(row6, 'Items',{'best','northeast','northwest','southeast','southwest','off'}, 'Value','best', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            uilabel(row6,'Text','X/Y scale','FontWeight','bold');
+            scales = uigridlayout(row6,[1 2],'ColumnWidth',{80,80},'Padding',[0 0 0 0]);
+            app.ResultsXScaleDropDown = uidropdown(scales, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            app.ResultsYScaleDropDown = uidropdown(scales, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            uilabel(row6,'Text','');
+            app.ResultsPlotStatusLabel = uilabel(row6, 'Text','Run solve to populate iteration snapshots.', 'FontColor',[0.35 0.35 0.35]);
 
-            uilabel(topG, 'Text','Plot 3');
-            app.ResultsConfig3XVarDD = uidropdown(topG, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig3YVarDD = uidropdown(topG, 'Items',varsY, 'Value','residual', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig3AxisDD = uidropdown(topG, 'Items',{'left','right'}, 'Value','left', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig3ScaleField = uieditfield(topG, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig3NormCheck = uicheckbox(topG, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig3CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig3TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-
-            uilabel(topG, 'Text','Plot 4');
-            app.ResultsConfig4XVarDD = uidropdown(topG, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig4YVarDD = uidropdown(topG, 'Items',varsY, 'Value','power', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig4AxisDD = uidropdown(topG, 'Items',{'left','right'}, 'Value','right', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig4ScaleField = uieditfield(topG, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig4NormCheck = uicheckbox(topG, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig4CompDD = uidropdown(topG, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsConfig4TargetDD = uidropdown(topG, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-
-            midG = uigridlayout(gl, [2 9], 'ColumnWidth',{'fit',130,'fit',120,'fit',105,'fit',95,'fit','1x'}, ...
-                'RowHeight',{24,24}, 'Padding',[0 0 0 0], 'ColumnSpacing',7, 'RowSpacing',4);
-            midG.Layout.Row = 2;
-            uilabel(midG,'Text','Preset','FontWeight','bold');
-            app.ResultsPresetDD = uidropdown(midG, 'Items',{'custom','convergence diagnostics','stream trajectories','unit performance'}, ...
-                'Value','custom');
-            app.ResultsApplyPresetBtn = uibutton(midG, 'push', 'Text','Apply preset', ...
-                'ButtonPushedFcn',@(~,~) app.applyResultsPreset());
-            uilabel(midG,'Text','Smoothing','FontWeight','bold');
-            app.ResultsSmoothingDD = uidropdown(midG, 'Items',{'none','moving-average','median'}, 'Value','none', ...
-                'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsSmoothWindowField = uieditfield(midG, 'numeric', 'Value',3, 'Limits',[1 999], ...
-                'RoundFractionalValues','on', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsNormModeDD = uidropdown(midG, 'Items',{'absolute','normalized'}, 'Value','absolute', ...
-                'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsLegendDD = uidropdown(midG, 'Items',{'best','northeast','northwest','southeast','southwest','off'}, ...
-                'Value','best', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-
-            uilabel(midG,'Text','X mode','FontWeight','bold');
-            app.ResultsXScaleDropDown = uidropdown(midG, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            uilabel(midG,'Text','Y mode','FontWeight','bold');
-            app.ResultsYScaleDropDown = uidropdown(midG, 'Items',{'linear','log'}, 'Value','linear', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
-            app.ResultsResetBtn = uibutton(midG, 'push', 'Text','Reset view', ...
-                'ButtonPushedFcn',@(~,~) app.resetResultsView());
-            app.ResultsClearChartBtn = uibutton(midG, 'push', 'Text','Clear chart', ...
-                'ButtonPushedFcn',@(~,~) app.clearResultsChart());
-            app.ResultsExportBtn = uibutton(midG, 'push', 'Text','Export figure', ...
-                'ButtonPushedFcn',@(~,~) app.exportResultsFigure());
-            app.ResultsPlotStatusLabel = uilabel(midG, 'Text','Run solve to populate iteration snapshots.', 'FontColor',[0.35 0.35 0.35]);
+            row7 = uigridlayout(cg,[1 4],'ColumnWidth',{110,110,110,'1x'},'Padding',[0 0 0 0]);
+            app.ResultsResetBtn = uibutton(row7, 'push', 'Text','Reset view', 'ButtonPushedFcn',@(~,~) app.resetResultsView());
+            app.ResultsClearChartBtn = uibutton(row7, 'push', 'Text','Clear chart', 'ButtonPushedFcn',@(~,~) app.clearResultsChart());
+            app.ResultsExportBtn = uibutton(row7, 'push', 'Text','Export figure', 'ButtonPushedFcn',@(~,~) app.exportResultsFigure());
+            uilabel(row7,'Text','');
 
             axP = uipanel(gl, 'Title','Results Trends', 'FontWeight','bold');
-            axP.Layout.Row = 3;
+            axP.Layout.Column = 2;
             axG = uigridlayout(axP,[1 1],'Padding',[4 4 4 4]);
             app.ResultsAxes = uiaxes(axG);
             grid(app.ResultsAxes,'on');
@@ -664,64 +631,107 @@ classdef MathLabApp < handle
             app.refreshResultsTargetOptions();
         end
 
+        function buildTraceRow(app, parent, idx, yDefault, axisDefault)
+            varsAll = {'iteration','residual','flow','T','P','conversion','efficiency','duty','power','y(i)','deltaT_hx','power_specific','conversion_profile'};
+            varsY = varsAll(2:end);
+            p = uipanel(parent, 'Title', sprintf('Trace %d', idx));
+            g = uigridlayout(p,[2 8],'ColumnWidth',{'fit',95,95,60,54,58,52,'1x'},'RowHeight',{24,24},'Padding',[6 6 6 6]);
+            uilabel(g,'Text','X'); uilabel(g,'Text','Y'); uilabel(g,'Text','Axis'); uilabel(g,'Text','Scale'); uilabel(g,'Text','Norm'); uilabel(g,'Text','Comp'); uilabel(g,'Text','Target'); uilabel(g,'Text','');
+            switch idx
+                case 1
+                    app.ResultsConfig1XVarDD = uidropdown(g, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig1YVarDD = uidropdown(g, 'Items',varsY, 'Value',yDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig1AxisDD = uidropdown(g, 'Items',{'left','right'}, 'Value',axisDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig1ScaleField = uieditfield(g, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig1NormCheck = uicheckbox(g, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig1CompDD = uidropdown(g, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig1TargetDD = uidropdown(g, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                case 2
+                    app.ResultsConfig2XVarDD = uidropdown(g, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig2YVarDD = uidropdown(g, 'Items',varsY, 'Value',yDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig2AxisDD = uidropdown(g, 'Items',{'left','right'}, 'Value',axisDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig2ScaleField = uieditfield(g, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig2NormCheck = uicheckbox(g, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig2CompDD = uidropdown(g, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig2TargetDD = uidropdown(g, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                case 3
+                    app.ResultsConfig3XVarDD = uidropdown(g, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig3YVarDD = uidropdown(g, 'Items',varsY, 'Value',yDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig3AxisDD = uidropdown(g, 'Items',{'left','right'}, 'Value',axisDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig3ScaleField = uieditfield(g, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig3NormCheck = uicheckbox(g, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig3CompDD = uidropdown(g, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig3TargetDD = uidropdown(g, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                otherwise
+                    app.ResultsConfig4XVarDD = uidropdown(g, 'Items',varsAll, 'Value','iteration', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig4YVarDD = uidropdown(g, 'Items',varsY, 'Value',yDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig4AxisDD = uidropdown(g, 'Items',{'left','right'}, 'Value',axisDefault, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig4ScaleField = uieditfield(g, 'numeric', 'Value',1, 'Limits',[-1e12 1e12], 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig4NormCheck = uicheckbox(g, 'Text','', 'Value',false, 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig4CompDD = uidropdown(g, 'Items',{'1'}, 'Value','1', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+                    app.ResultsConfig4TargetDD = uidropdown(g, 'Items',{'(none)'}, 'Value','(none)', 'ValueChangedFcn',@(~,~) app.refreshResultsTable());
+            end
+        end
+
         function buildResultsTablesTab(app)
             t = uitab(app.Tabs, 'Title', ' Results - Tables ');
             app.ResultsTablesTab = t;
-            gl = uigridlayout(t, [4 2], 'RowHeight',{30,30,30,'1x'}, ...
-                'ColumnWidth',{'1x','1x'}, 'Padding',[12 12 12 12], 'RowSpacing',8, 'ColumnSpacing',8);
-            uilabel(gl,'Text','Tables workspace (report prep)','FontWeight','bold','FontSize',13);
-            uilabel(gl,'Text','Open read-only tables and export quickly to CSV.');
-            uibutton(gl,'push','Text','Open Stream Table', 'ButtonPushedFcn',@(~,~) app.openStreamTablePopup());
-            uibutton(gl,'push','Text','Open Unit Table', 'ButtonPushedFcn',@(~,~) app.openUnitTablePopup());
-            app.ResultsExportStreamCsvBtn = uibutton(gl,'push','Text','Export Stream Table CSV', ...
-                'ButtonPushedFcn',@(~,~) app.exportResultsStreamCsv());
-            app.ResultsExportUnitCsvBtn = uibutton(gl,'push','Text','Export Unit Table CSV', ...
-                'ButtonPushedFcn',@(~,~) app.exportResultsUnitCsv());
-            notes = uitextarea(gl,'Editable','off','Value',{'CSV files include displayed units in column names where available.'});
-            notes.Layout.Row = 4;
-            notes.Layout.Column = [1 2];
+            gl = uigridlayout(t, [3 2], 'RowHeight',{28,'1x',24}, 'ColumnWidth',{'1x','1x'}, ...
+                'Padding',[12 12 12 12], 'ColumnSpacing',8, 'RowSpacing',6);
+            uilabel(gl,'Text','Stream results', 'FontWeight','bold');
+            uilabel(gl,'Text','Unit results', 'FontWeight','bold');
+            app.ResultsStreamTable = uitable(gl, 'ColumnEditable', false);
+            app.ResultsUnitTable = uitable(gl, 'ColumnEditable', false);
+            app.ResultsTablesStatusLabel = uilabel(gl, 'Text','Run solve to refresh tables for reporting.', 'FontColor',[0.35 0.35 0.35]);
+            app.ResultsTablesStatusLabel.Layout.Row = 3;
+            app.ResultsTablesStatusLabel.Layout.Column = [1 2];
+            app.refreshResultsTablesTab();
         end
 
         function buildResultsStabilityTab(app)
             t = uitab(app.Tabs, 'Title', ' Results - Stability ');
             app.ResultsStabilityTab = t;
-            gl = uigridlayout(t, [3 4], 'RowHeight',{28,28,'1x'}, ...
+            gl = uigridlayout(t, [3 4], 'RowHeight',{28,34,'1x'}, ...
                 'ColumnWidth',{'fit','1x','fit','1x'}, 'Padding',[12 12 12 12], 'ColumnSpacing',8, 'RowSpacing',6);
             uilabel(gl,'Text','Sweep parameter','FontWeight','bold');
-            app.ResultsStabilitySweepParamDD = uidropdown(gl, ...
-                'Items',{'none','Reactor conversion','Purge beta','Separator phi(1)'}, 'Value','none');
+            app.ResultsStabilitySweepParamDD = uidropdown(gl, 'Items',{'none','Reactor conversion','Purge beta','Separator phi(1)'}, 'Value','none');
             uilabel(gl,'Text','min/max/pts','FontWeight','bold');
             sweepRangeG = uigridlayout(gl,[1 3], 'ColumnWidth',{'1x','1x',54}, 'Padding',[0 0 0 0]);
             app.ResultsStabilitySweepMinField = uieditfield(sweepRangeG, 'numeric', 'Value',0.1);
             app.ResultsStabilitySweepMaxField = uieditfield(sweepRangeG, 'numeric', 'Value',0.9);
             app.ResultsStabilitySweepPtsField = uieditfield(sweepRangeG, 'numeric', 'Value',11, 'Limits',[2 200], 'RoundFractionalValues','on');
             app.ResultsStabilitySweepPtsField.Layout.Column = 3;
-            app.ResultsStabilityBtn = uibutton(gl, 'push', 'Text','Run Stability Overlay on Trends Plot', ...
-                'FontWeight','bold', 'BackgroundColor',[0.93 0.88 0.99], ...
-                'ButtonPushedFcn',@(~,~) app.updateStabilityOverlay());
+            app.ResultsStabilityBtn = uibutton(gl, 'push', 'Text','Run Nyquist + Sweep', ...
+                'FontWeight','bold', 'BackgroundColor',[0.93 0.88 0.99], 'ButtonPushedFcn',@(~,~) app.updateStabilityAnalysisTab());
             app.ResultsStabilityBtn.Layout.Column = [1 2];
-            txt = uitextarea(gl, 'Editable','off', 'Value', ...
-                {'Stability charts are rendered on the Trends axes for now.', ...
-                 'Use this tab to configure the sweep and run stability overlay.'});
-            txt.Layout.Column = [3 4];
-            txt.Layout.Row = [2 3];
+            app.ResultsStabilityStatusLabel = uilabel(gl, 'Text','Run solve then run Nyquist + sweep.', 'FontColor',[0.35 0.35 0.35]);
+            app.ResultsStabilityStatusLabel.Layout.Column = [3 4];
+
+            p1 = uipanel(gl, 'Title','Nyquist (proxy from local linearization A)', 'FontWeight','bold');
+            p1.Layout.Row = 3; p1.Layout.Column = [1 2];
+            g1 = uigridlayout(p1,[1 1],'Padding',[4 4 4 4]);
+            app.ResultsNyquistAxes = uiaxes(g1);
+            grid(app.ResultsNyquistAxes,'on'); xlabel(app.ResultsNyquistAxes,'Re(G(j\omega))'); ylabel(app.ResultsNyquistAxes,'Im(G(j\omega))');
+
+            p2 = uipanel(gl, 'Title','Stability sweep (max real pole)', 'FontWeight','bold');
+            p2.Layout.Row = 3; p2.Layout.Column = [3 4];
+            g2 = uigridlayout(p2,[1 1],'Padding',[4 4 4 4]);
+            app.ResultsStabilitySweepAxes = uiaxes(g2);
+            grid(app.ResultsStabilitySweepAxes,'on'); xlabel(app.ResultsStabilitySweepAxes,'Parameter'); ylabel(app.ResultsStabilitySweepAxes,'max Re(pole)');
         end
 
         function buildResultsExportTab(app)
             t = uitab(app.Tabs, 'Title', ' Results - Export ');
             app.ResultsExportTab = t;
-            gl = uigridlayout(t, [6 1], 'RowHeight',{28,28,28,28,28,'1x'}, 'Padding',[12 12 12 12], 'RowSpacing',8);
-            uilabel(gl,'Text','CSV-first reporting exports','FontWeight','bold','FontSize',13);
-            app.ResultsExportSummaryCsvBtn = uibutton(gl,'push','Text','Export Summary CSV', ...
-                'ButtonPushedFcn',@(~,~) app.exportResultsSummaryCsv());
-            app.ResultsExportTracesCsvBtn = uibutton(gl,'push','Text','Export Trends Traces CSV', ...
-                'ButtonPushedFcn',@(~,~) app.exportResultsTracesCsv());
-            app.ResultsExportSnapshotsCsvBtn = uibutton(gl,'push','Text','Export Snapshot History CSV', ...
-                'ButtonPushedFcn',@(~,~) app.exportResultsSnapshotsCsv());
-            helpText = uitextarea(gl,'Editable','off', 'Value', ...
-                {'All exports are written to output/results unless a custom export path has been selected.', ...
-                 'CSV schema is intentionally flat for spreadsheet/report compatibility.'});
-            helpText.Layout.Row = 6;
+            gl = uigridlayout(t, [7 1], 'RowHeight',{28,28,28,28,28,28,'1x'}, 'Padding',[12 12 12 12], 'RowSpacing',8);
+            uilabel(gl,'Text','CSV-first reporting exports', 'FontWeight','bold', 'FontSize',13);
+            app.ResultsExportSummaryCsvBtn = uibutton(gl,'push','Text','Export Summary CSV', 'ButtonPushedFcn',@(~,~) app.exportResultsSummaryCsv());
+            app.ResultsExportTracesCsvBtn = uibutton(gl,'push','Text','Export Trends Traces CSV', 'ButtonPushedFcn',@(~,~) app.exportResultsTracesCsv());
+            app.ResultsExportSnapshotsCsvBtn = uibutton(gl,'push','Text','Export Snapshot History CSV', 'ButtonPushedFcn',@(~,~) app.exportResultsSnapshotsCsv());
+            app.ResultsExportStreamCsvBtn = uibutton(gl,'push','Text','Export Stream Table CSV', 'ButtonPushedFcn',@(~,~) app.exportResultsStreamCsv());
+            app.ResultsExportUnitCsvBtn = uibutton(gl,'push','Text','Export Unit Table CSV', 'ButtonPushedFcn',@(~,~) app.exportResultsUnitCsv());
+            app.ResultsExportAllCsvBtn = uibutton(gl,'push','Text','Export Full CSV Bundle', 'FontWeight','bold', 'ButtonPushedFcn',@(~,~) app.exportResultsBundleCsv());
+            app.ResultsExportStatusArea = uitextarea(gl, 'Editable','off', 'Value', {'Export log will appear here.'});
         end
 
         % ================================================================
@@ -865,6 +875,7 @@ classdef MathLabApp < handle
             app.updateDOF();
             app.refreshUnitTablePopup();
             app.refreshStreamTablePopup();
+            app.refreshResultsTablesTab();
             app.updateSensDropdowns();
             app.refreshSpeciesPropsTable();
             app.StreamNameField.Value = 'S2';
@@ -1263,6 +1274,7 @@ classdef MathLabApp < handle
             app.updateDOF();
             app.refreshUnitTablePopup();
             app.refreshStreamTablePopup();
+            app.refreshResultsTablesTab();
         end
 
         function idx = getSelectedUnitIdx(app)
@@ -1289,6 +1301,7 @@ classdef MathLabApp < handle
             app.updateDOF();
             app.refreshUnitTablePopup();
             app.refreshStreamTablePopup();
+            app.refreshResultsTablesTab();
         end
     end
 
@@ -2122,8 +2135,9 @@ classdef MathLabApp < handle
                 app.refreshResultsSummaryModel();
 
                 app.refreshResultsTable();
-                app.updateStabilityOverlay();
+                app.updateStabilityAnalysisTab();
                 app.refreshResultsSummaryPanel();
+                app.refreshResultsTablesTab();
 
                 app.refreshStreamTables();
 
@@ -2131,6 +2145,7 @@ classdef MathLabApp < handle
                 app.resultsSummary = struct('status','Solve failed','residual',NaN,'iterations',0, ...
                     'streamKey','-','unitKey','-','streamText','-','unitText','-','deltaText','-');
                 app.refreshResultsSummaryPanel();
+                app.refreshResultsTablesTab();
                 title(app.ResidualAxes, 'FAILED');
                 logLines = [{'SOLVE FAILED:'; ME.message; ''}; ...
                     arrayfun(@(f) sprintf('  %s (line %d)',f.name,f.line), ME.stack,'Uni',false)];
@@ -2725,6 +2740,7 @@ classdef MathLabApp < handle
             filepath = fullfile(outDir, app.autoFileName('results_summary', 'csv'));
             writetable(T, filepath);
             app.setStatus(sprintf('Results summary exported to %s', filepath));
+            app.appendResultsExportLog(sprintf('Results summary exported: %s', filepath));
         end
 
         function exportResultsSnapshotsCsv(app)
@@ -2741,6 +2757,7 @@ classdef MathLabApp < handle
             filepath = fullfile(outDir, app.autoFileName('results_snapshots', 'csv'));
             writetable(T, filepath);
             app.setStatus(sprintf('Snapshot history exported to %s', filepath));
+            app.appendResultsExportLog(sprintf('Snapshot history exported: %s', filepath));
         end
 
         function exportResultsTracesCsv(app)
@@ -2776,6 +2793,7 @@ classdef MathLabApp < handle
             filepath = fullfile(outDir, app.autoFileName('results_traces', 'csv'));
             writetable(T, filepath);
             app.setStatus(sprintf('Results traces exported to %s', filepath));
+            app.appendResultsExportLog(sprintf('Results traces exported: %s', filepath));
         end
 
         function exportResultsStreamCsv(app)
@@ -2784,10 +2802,121 @@ classdef MathLabApp < handle
             filepath = fullfile(outDir, app.autoFileName('stream_table', 'csv'));
             writetable(T, filepath);
             app.setStatus(sprintf('Stream table exported to %s', filepath));
+            app.appendResultsExportLog(sprintf('Stream table exported: %s', filepath));
         end
 
         function exportResultsUnitCsv(app)
             app.exportUnitTableToOutput('csv');
+            app.appendResultsExportLog('Unit table CSV export requested (see status/output folder).');
+        end
+
+        function refreshResultsTablesTab(app)
+            if ~isempty(app.ResultsStreamTable) && isvalid(app.ResultsStreamTable)
+                Ts = app.buildDisplayStreamTable();
+                app.ResultsStreamTable.Data = Ts;
+                app.ResultsStreamTable.ColumnName = Ts.Properties.VariableNames;
+            end
+            if ~isempty(app.ResultsUnitTable) && isvalid(app.ResultsUnitTable)
+                Tu = app.buildUnitResultsTable();
+                app.ResultsUnitTable.Data = Tu;
+                app.ResultsUnitTable.ColumnName = Tu.Properties.VariableNames;
+            end
+            if ~isempty(app.ResultsTablesStatusLabel) && isvalid(app.ResultsTablesStatusLabel)
+                if isempty(app.lastSolver)
+                    app.ResultsTablesStatusLabel.Text = 'Tables show current configured values. Run solve for final solved metrics.';
+                else
+                    app.ResultsTablesStatusLabel.Text = 'Tables refreshed from latest solved state.';
+                end
+            end
+        end
+
+        function updateStabilityAnalysisTab(app)
+            if isempty(app.lastSolver)
+                if ~isempty(app.ResultsStabilityStatusLabel) && isvalid(app.ResultsStabilityStatusLabel)
+                    app.ResultsStabilityStatusLabel.Text = 'No solve available. Run solver first.';
+                end
+                return;
+            end
+            try
+                st = app.lastSolver.localStabilityProxy();
+                A = st.A;
+                n = size(A,1);
+                w = logspace(-3, 3, 260);
+                G = nan(numel(w),1);
+                I = eye(n);
+                for k = 1:numel(w)
+                    M = (1i*w(k))*I - A;
+                    G(k) = trace(M\I) / max(1,n);
+                end
+
+                if ~isempty(app.ResultsNyquistAxes) && isvalid(app.ResultsNyquistAxes)
+                    cla(app.ResultsNyquistAxes, 'reset');
+                    hold(app.ResultsNyquistAxes,'on');
+                    plot(app.ResultsNyquistAxes, real(G), imag(G), 'LineWidth',1.5, 'DisplayName','+\omega');
+                    plot(app.ResultsNyquistAxes, real(conj(flipud(G))), imag(conj(flipud(G))), '--', 'LineWidth',1.2, 'DisplayName','-\omega');
+                    plot(app.ResultsNyquistAxes, -1, 0, 'rx', 'MarkerSize',8, 'LineWidth',1.6, 'DisplayName','-1+0j');
+                    grid(app.ResultsNyquistAxes,'on');
+                    xlabel(app.ResultsNyquistAxes,'Re(G(j\omega))');
+                    ylabel(app.ResultsNyquistAxes,'Im(G(j\omega))');
+                    legend(app.ResultsNyquistAxes,'Location','best');
+                    title(app.ResultsNyquistAxes, sprintf('Proxy Nyquist | max Re(pole)=%.3e', st.maxReal));
+                    hold(app.ResultsNyquistAxes,'off');
+                end
+
+                sweepData = app.collectStabilitySweep();
+                if ~isempty(app.ResultsStabilitySweepAxes) && isvalid(app.ResultsStabilitySweepAxes)
+                    cla(app.ResultsStabilitySweepAxes, 'reset');
+                    grid(app.ResultsStabilitySweepAxes,'on');
+                    if ~isempty(sweepData.values)
+                        plot(app.ResultsStabilitySweepAxes, sweepData.values, sweepData.maxRealPole, '-o', 'LineWidth',1.4);
+                        yline(app.ResultsStabilitySweepAxes, 0, '--r', 'HandleVisibility','off');
+                    else
+                        text(app.ResultsStabilitySweepAxes, 0.05, 0.5, 'No sweep configured', 'Units','normalized');
+                    end
+                    xlabel(app.ResultsStabilitySweepAxes, 'Sweep parameter');
+                    ylabel(app.ResultsStabilitySweepAxes, 'max Re(pole)');
+                end
+
+                app.stabilitySweepData = sweepData;
+                stableTxt = ternary(st.stable, 'stable', 'unstable');
+                if ~isempty(app.ResultsStabilityStatusLabel) && isvalid(app.ResultsStabilityStatusLabel)
+                    app.ResultsStabilityStatusLabel.Text = sprintf('Nyquist refreshed. Local system is %s (max Re=%.3e).', stableTxt, st.maxReal);
+                end
+            catch ME
+                if ~isempty(app.ResultsStabilityStatusLabel) && isvalid(app.ResultsStabilityStatusLabel)
+                    app.ResultsStabilityStatusLabel.Text = sprintf('Stability analysis failed: %s', ME.message);
+                end
+            end
+        end
+
+        function txt = ternary(~, cond, a, b)
+            if cond, txt = a; else, txt = b; end
+        end
+
+        function appendResultsExportLog(app, msg)
+            if isempty(app.ResultsExportStatusArea) || ~isvalid(app.ResultsExportStatusArea)
+                return;
+            end
+            vals = app.ResultsExportStatusArea.Value;
+            if ischar(vals), vals = {vals}; end
+            vals{end+1} = msg;
+            if numel(vals) > 20
+                vals = vals(end-19:end);
+            end
+            app.ResultsExportStatusArea.Value = vals;
+        end
+
+        function exportResultsBundleCsv(app)
+            try
+                app.exportResultsSummaryCsv();
+                app.exportResultsTracesCsv();
+                app.exportResultsSnapshotsCsv();
+                app.exportResultsStreamCsv();
+                app.exportResultsUnitCsv();
+                app.appendResultsExportLog('Full CSV bundle exported successfully.');
+            catch ME
+                app.appendResultsExportLog(sprintf('Bundle export failed: %s', ME.message));
+            end
         end
 
         function resetResultsView(app)
@@ -2848,6 +2977,7 @@ classdef MathLabApp < handle
             if ~isempty(app.UnitTableFig) && isvalid(app.UnitTableFig)
                 app.refreshUnitTablePopup();
             app.refreshStreamTablePopup();
+            app.refreshResultsTablesTab();
                 app.UnitTableFig.Visible = 'on';
                 return;
             end
@@ -2883,6 +3013,7 @@ classdef MathLabApp < handle
 
             app.refreshUnitTablePopup();
             app.refreshStreamTablePopup();
+            app.refreshResultsTablesTab();
         end
 
         function onUnitTablePopupClosed(app, src)
@@ -3337,6 +3468,7 @@ classdef MathLabApp < handle
             app.refreshResultsTable();
             app.refreshUnitTablePopup();
             app.refreshStreamTablePopup();
+            app.refreshResultsTablesTab();
         end
 
         function prefs = mergeUnitPrefs(~, inPrefs)
@@ -4079,6 +4211,7 @@ classdef MathLabApp < handle
             app.updateDOF();
             app.refreshUnitTablePopup();
             app.refreshStreamTablePopup();
+            app.refreshResultsTablesTab();
             app.updateSensDropdowns();
             app.refreshSpeciesPropsTable();
 
