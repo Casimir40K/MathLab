@@ -55,6 +55,11 @@ classdef ProcessSolver < handle
 
         damping = 1.0
 
+        % Line-search acceptance guard: require weighted residual decrease
+        % but allow small unweighted residual growth to avoid false
+        % stagnation rejects in mixed-scale nonlinear systems.
+        lineSearchMaxUnweightedIncreaseRatio double = 0.02
+
         % Safety bounds
         nDotMin = 1e-12
         nDotMax = 1e8
@@ -685,7 +690,10 @@ classdef ProcessSolver < handle
             decreaseTol = 1e-8;
             noiseTol = 1e-14;
             strictTargetW = rnW * (1 - decreaseTol);
-            strictTargetU = rnU * (1 - decreaseTol);
+            % Keep weighted residual as the primary acceptance criterion.
+            % Permit a small unweighted-residual increase to avoid
+            % rejecting productive steps when scales are heterogeneous.
+            maxTargetU = rnU * (1 + max(0, obj.lineSearchMaxUnweightedIncreaseRatio));
             flatSeen = false;
 
             while bt < 30
@@ -694,10 +702,9 @@ classdef ProcessSolver < handle
                 if okCand
                     rnUCand = norm(rCand);
                     rnWCand = norm(w .* rCand);
-                    % Accept only if BOTH weighted and unweighted norms
-                    % strictly decrease. This prevents auto-scale weights
-                    % from hiding growth in physical (unweighted) residuals.
-                    if rnWCand <= strictTargetW && rnUCand <= strictTargetU
+                    % Accept if weighted norm strictly decreases and the
+                    % unweighted norm does not grow beyond a small guard.
+                    if rnWCand <= strictTargetW && rnUCand <= maxTargetU
                         accepted = true;
                         x_new = xCand;
                         r_new = rCand;
@@ -1143,6 +1150,27 @@ classdef ProcessSolver < handle
                 return
             end
 
+            % Composition logits can appear disconnected at initialization
+            % when the associated stream flow starts near zero. In that
+            % regime component-flow equations are numerically flat in y,
+            % but the DOF is still physically connected once n_dot lifts.
+            keep = true(size(dead));
+            for i = 1:numel(dead)
+                k = dead(i);
+                m = obj.map(k);
+                if strcmp(m.var, 'a') && obj.isNearZeroFlowStream(m.streamIndex)
+                    keep(i) = false;
+                    obj.log(['Jacobian dead-column candidate ignored: x(%d) %s ' ...
+                        '(near-zero stream flow n_dot=%.3e).'], ...
+                        k, obj.describeUnknown(m), obj.streams{m.streamIndex}.n_dot);
+                end
+            end
+
+            dead = dead(keep);
+            if isempty(dead)
+                return
+            end
+
             msgLines = strings(numel(dead),1);
             for i = 1:numel(dead)
                 k = dead(i);
@@ -1158,6 +1186,20 @@ classdef ProcessSolver < handle
             else
                 warning('%s Unknown(s): %s', msg, strjoin(cellstr(msgLines), '; '));
             end
+        end
+
+        function tf = isNearZeroFlowStream(obj, streamIndex)
+            tf = false;
+            if ~isfinite(streamIndex) || streamIndex < 1 || streamIndex > numel(obj.streams)
+                return
+            end
+
+            s = obj.streams{streamIndex};
+            if ~isprop(s, 'n_dot') || ~isfinite(s.n_dot)
+                return
+            end
+
+            tf = abs(s.n_dot) <= max(1e3 * obj.nDotMin, 1e-9);
         end
 
         function txt = describeUnknown(~, m)

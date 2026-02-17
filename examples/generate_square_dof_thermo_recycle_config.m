@@ -20,18 +20,20 @@ cfg.speciesMW    = [2.016, 32.00, 18.015];
 cfg.projectTitle = 'Square DOF Thermo Recycle';
 
 % === Streams ===
+% Guesses are chosen to be recycle-consistent (Mixer/Reactor/Separator/Purge)
+% so early line-search iterations start near material-balance feasibility.
 streamDefs = {
 % name  n_dot       T       P      y                                  kn_n  kn_T  kn_P  kn_y
   'S1', 10.0,       300.0,  1e5, [0.80 0.20 0.00],                    true, true, true, true;
-  'S2', 7.00008,    300.0,  1e5, [0.85713287 0.14285548 1.1650897e-05], false,false,false,false;
-  'S3', 12.0,       300.0,  1e5, [0.75 0.20 0.05],                    false,false,false,false;
-  'S4', 2.00001,    500.0,  1e5, [0.99999299 9.8057565e-13 7.0051635e-06], false,false,false,false;
-  'S5', 6.62051e-05,278.15, 1e5, [9.9947768e-07 9.9453556e-07 0.99999801], false,false,false,false;
-  'S6', 1.12798e-07,278.15, 1e5, [1 1e-12 1e-12],                     false,false,false,false;
-  'S7', 3.99959e-09,278.15, 1e5, [1 1e-12 1e-12],                     false,false,false,false;
-  'Sp', 2.19131e-05,278.15, 1e5, [1 1e-12 1e-12],                     false,false,false,false;
-  'Sh', 4.0,        500.0,  1e5, [1 1e-12 1e-12],                     false,false,false,false;
-  'Sc', 5.33275e-06,278.15, 1e5, [1e-12 1e-12 1],                     false,false,false,false;
+  'S2', 17.25,      300.0,  1e5, [0.821 0.175 0.004],                 false,false,false,false;
+  'S3', 17.25,      300.0,  1e5, [0.821 0.175 0.004],                 false,false,false,false;
+  'S4', 15.14,      500.0,  1e5, [0.657 0.060 0.283],                 false,false,false,false;
+  'S5', 4.368,      278.15, 1e5, [0.165 0.027 0.808],                 false,false,false,false;
+  'S6', 7.632,      278.15, 1e5, [0.849 0.142 0.009],                 false,false,false,false;
+  'S7', 7.250,      278.15, 1e5, [0.849 0.142 0.009],                 false,false,false,false;
+  'Sp', 0.382,      278.15, 1e5, [0.849 0.142 0.009],                 false,false,false,false;
+  'Sh', 17.25,      500.0,  1e5, [0.821 0.175 0.004],                 false,false,false,false;
+  'Sc', 15.14,      278.15, 1e5, [0.657 0.060 0.283],                 false,false,false,false;
 };
 
 for i = 1:size(streamDefs,1)
