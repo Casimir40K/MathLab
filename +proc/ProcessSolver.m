@@ -41,6 +41,9 @@ classdef ProcessSolver < handle
         % constrained by softmax parameterization in unpackUnknowns().
         removeRedundantNormalizationConstraints logical = true
 
+        % Preflight diagnostics for contradictory fixed stream specs.
+        failOnKnownSpecConflicts logical = true
+
         printToConsole = false
         consoleStride  = 10
 
@@ -134,6 +137,20 @@ classdef ProcessSolver < handle
 
             [x, obj.map] = obj.packUnknowns();
             eqNames = obj.buildEquationLabels();
+
+            specIssues = obj.detectKnownSpecConflicts();
+            if ~isempty(specIssues)
+                for i = 1:numel(specIssues)
+                    obj.log('Spec conflict: %s', specIssues(i));
+                end
+                msg = sprintf(['Detected %d contradictory known/spec constraint(s). ' ...
+                    'This commonly causes apparent thermo non-convergence with static residuals.'], numel(specIssues));
+                if obj.failOnKnownSpecConflicts
+                    error('%s Clear conflicting Known flags or unit specs and re-run.', msg);
+                else
+                    warning(char(msg));
+                end
+            end
 
             vars = string({obj.map.var});
             obj.log('Packed unknowns: %d total (%d T, %d P)', ...
@@ -986,6 +1003,62 @@ classdef ProcessSolver < handle
                 fprintf(dbg.out, '      n_dot=%.6e, sum(n_dot*y)=%.6e, diff=%+.3e\n', ...
                     s.n_dot, compFlowSum, diffFlow);
             end
+        end
+
+        function issues = detectKnownSpecConflicts(obj)
+            issues = strings(0,1);
+            for u = 1:numel(obj.units)
+                unit = obj.units{u};
+                uName = string(class(unit));
+                if ismethod(unit, 'describe')
+                    try
+                        uName = string(unit.describe());
+                    catch
+                        uName = string(class(unit));
+                    end
+                end
+
+                if isprop(unit, 'inlet') && isprop(unit, 'outlet')
+                    sIn = unit.inlet;
+                    sOut = unit.outlet;
+
+                    if obj.isKnownFlagTrue(sIn, 'T') && obj.isKnownFlagTrue(sOut, 'T')
+                        if abs(sOut.T - sIn.T) > 1e-9
+                            issues(end+1,1) = sprintf('%s has both inlet/outlet T marked Known but T_out-T_in=%+.3e K.', uName, sOut.T - sIn.T);
+                        end
+                    end
+                    if obj.isKnownFlagTrue(sIn, 'P') && obj.isKnownFlagTrue(sOut, 'P')
+                        if abs(sOut.P - sIn.P) > 1e-6
+                            issues(end+1,1) = sprintf('%s has both inlet/outlet P marked Known but P_out-P_in=%+.3e Pa.', uName, sOut.P - sIn.P);
+                        end
+                    end
+                end
+
+                if isprop(unit, 'Tout') && isfinite(unit.Tout) && isprop(unit, 'outlet')
+                    sOut = unit.outlet;
+                    if obj.isKnownFlagTrue(sOut, 'T') && abs(sOut.T - unit.Tout) > 1e-9
+                        issues(end+1,1) = sprintf('%s Tout=%.6g K conflicts with Known outlet T=%.6g K on stream %s.', ...
+                            uName, unit.Tout, sOut.T, string(sOut.name));
+                    end
+                end
+
+                if isprop(unit, 'Pout') && isfinite(unit.Pout) && isprop(unit, 'outlet')
+                    sOut = unit.outlet;
+                    if obj.isKnownFlagTrue(sOut, 'P') && abs(sOut.P - unit.Pout) > 1e-6
+                        issues(end+1,1) = sprintf('%s Pout=%.6g Pa conflicts with Known outlet P=%.6g Pa on stream %s.', ...
+                            uName, unit.Pout, sOut.P, string(sOut.name));
+                    end
+                end
+            end
+        end
+
+        function tf = isKnownFlagTrue(~, s, field)
+            tf = false;
+            if ~(isprop(s,'known') && isstruct(s.known) && isfield(s.known, field))
+                return
+            end
+            v = s.known.(field);
+            tf = islogical(v) && isscalar(v) && v;
         end
 
         function [dominantMixer, eqIdx, eqVal] = findDominantMixer(obj, r)
