@@ -1987,6 +1987,7 @@ classdef MathLabApp < handle
 
             try
                 solver = fs.solve('maxIter',maxIt,'tolAbs',tol, ...
+                    'autoScale',true, ...
                     'printToConsole',false,'iterCallback',@iterCb);
                 app.lastSolver = solver;
 
@@ -4140,7 +4141,7 @@ classdef MathLabApp < handle
                 try
                     app.applySensParam(paramChoice, unitIdx, vals(p), unitSel);
                     fs = app.buildFlowsheet();
-                    fs.solve('maxIter',sensMaxIt,'tolAbs',sensTol,'printToConsole',false);
+                    fs.solve('maxIter',sensMaxIt,'tolAbs',sensTol,'autoScale',true,'printToConsole',false);
                     results(p) = app.extractOutput(outStreamName, outFieldStr);
                 catch
                     results(p) = NaN;

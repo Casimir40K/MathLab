@@ -24,6 +24,11 @@ classdef ProcessSolver < handle
         pressureResidualScale = 1
         useWeightedNormForConvergence logical = true
 
+        % Auto-scale: derive per-equation weights from initial residual
+        % magnitudes so that all equations contribute equally to the norm.
+        autoScale logical = false
+        autoScaleMinMagnitude double = 1e-6
+
         % Jacobian refresh trigger when convergence stalls
         stallRatioThreshold = 0.9
         stallIterWindow = 3
@@ -127,7 +132,11 @@ classdef ProcessSolver < handle
             if ~ok
                 error('Initial residual returned NaN/Inf. Check initial guesses (n_dot,y,T,P).');
             end
-            w = obj.buildEquationWeights(eqNames, numel(r));
+            w = obj.buildEquationWeights(eqNames, numel(r), r);
+            if obj.autoScale
+                obj.log('Auto-scaling enabled: weights derived from initial |r| (minMag=%.1e, wRange=[%.2e, %.2e])', ...
+                    obj.autoScaleMinMagnitude, min(w), max(w));
+            end
             r0u = norm(r);
             r0w = norm(w .* r);
             obj.residualHistory(end+1) = r0u;
@@ -575,8 +584,25 @@ classdef ProcessSolver < handle
             end
         end
 
-        function w = buildEquationWeights(obj, eqNames, nEq)
-            if isempty(obj.equationWeights)
+        function w = buildEquationWeights(obj, eqNames, nEq, r0)
+            if ~isempty(obj.equationWeights)
+                ew = obj.equationWeights(:);
+                if isscalar(ew)
+                    w = repmat(ew, nEq, 1);
+                elseif numel(ew) == nEq
+                    w = ew;
+                else
+                    error('equationWeights must be scalar or length %d.', nEq);
+                end
+            elseif obj.autoScale && nargin >= 4 && ~isempty(r0)
+                % Derive per-equation weights from initial residual
+                % magnitudes so that all equations contribute equally.
+                w = ones(nEq, 1);
+                for i = 1:nEq
+                    mag = abs(r0(min(i, numel(r0))));
+                    w(i) = 1 / max(mag, obj.autoScaleMinMagnitude);
+                end
+            else
                 w = ones(nEq,1) / max(obj.defaultResidualScale, eps);
                 for i = 1:nEq
                     lbl = lower(char(eqNames(min(i, numel(eqNames)))));
@@ -587,15 +613,6 @@ classdef ProcessSolver < handle
                     elseif contains(lbl, 'flow') || contains(lbl, 'mass') || contains(lbl, 'mole') || contains(lbl, 'n_dot')
                         w(i) = 1 / max(obj.flowResidualScale, eps);
                     end
-                end
-            else
-                ew = obj.equationWeights(:);
-                if isscalar(ew)
-                    w = repmat(ew, nEq, 1);
-                elseif numel(ew) == nEq
-                    w = ew;
-                else
-                    error('equationWeights must be scalar or length %d.', nEq);
                 end
             end
             w(~isfinite(w) | w <= 0) = 1;
