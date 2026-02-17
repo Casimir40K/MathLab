@@ -41,6 +41,14 @@ classdef ProcessSolver < handle
         % constrained by softmax parameterization in unpackUnknowns().
         removeRedundantNormalizationConstraints logical = true
 
+        % Preflight diagnostics for contradictory fixed stream specs.
+        failOnKnownSpecConflicts logical = true
+
+        % Preflight diagnostics for disconnected/flat unknowns whose
+        % Jacobian column is numerically near-zero at initialization.
+        failOnJacobianDeadColumns logical = true
+        jacobianDeadColumnTol double = 1e-12
+
         printToConsole = false
         consoleStride  = 10
 
@@ -135,6 +143,20 @@ classdef ProcessSolver < handle
             [x, obj.map] = obj.packUnknowns();
             eqNames = obj.buildEquationLabels();
 
+            specIssues = obj.detectKnownSpecConflicts();
+            if ~isempty(specIssues)
+                for i = 1:numel(specIssues)
+                    obj.log('Spec conflict: %s', specIssues(i));
+                end
+                msg = sprintf(['Detected %d contradictory known/spec constraint(s). ' ...
+                    'This commonly causes apparent thermo non-convergence with static residuals.'], numel(specIssues));
+                if obj.failOnKnownSpecConflicts
+                    error('%s Clear conflicting Known flags or unit specs and re-run.', msg);
+                else
+                    warning(char(msg));
+                end
+            end
+
             vars = string({obj.map.var});
             obj.log('Packed unknowns: %d total (%d T, %d P)', ...
                 numel(x), sum(vars=="T"), sum(vars=="P"));
@@ -143,6 +165,9 @@ classdef ProcessSolver < handle
             if ~ok
                 error('Initial residual returned NaN/Inf. Check initial guesses (n_dot,y,T,P).');
             end
+
+            obj.checkInitialJacobianConnectivity(x, r);
+
             w = obj.buildEquationWeights(eqNames, numel(r), r);
             if obj.autoScale
                 obj.log('Auto-scaling enabled: weights derived from initial |r| (minMag=%.1e, wRange=[%.2e, %.2e])', ...
@@ -985,6 +1010,112 @@ classdef ProcessSolver < handle
                     string(s.name), sumY, sumY - 1, minY, maxY);
                 fprintf(dbg.out, '      n_dot=%.6e, sum(n_dot*y)=%.6e, diff=%+.3e\n', ...
                     s.n_dot, compFlowSum, diffFlow);
+            end
+        end
+
+        function issues = detectKnownSpecConflicts(obj)
+            issues = strings(0,1);
+            for u = 1:numel(obj.units)
+                unit = obj.units{u};
+                uName = string(class(unit));
+                if ismethod(unit, 'describe')
+                    try
+                        uName = string(unit.describe());
+                    catch
+                        uName = string(class(unit));
+                    end
+                end
+
+                if isprop(unit, 'inlet') && isprop(unit, 'outlet')
+                    sIn = unit.inlet;
+                    sOut = unit.outlet;
+
+                    if obj.isKnownFlagTrue(sIn, 'T') && obj.isKnownFlagTrue(sOut, 'T')
+                        if abs(sOut.T - sIn.T) > 1e-9
+                            issues(end+1,1) = sprintf('%s has both inlet/outlet T marked Known but T_out-T_in=%+.3e K.', uName, sOut.T - sIn.T);
+                        end
+                    end
+                    if obj.isKnownFlagTrue(sIn, 'P') && obj.isKnownFlagTrue(sOut, 'P')
+                        if abs(sOut.P - sIn.P) > 1e-6
+                            issues(end+1,1) = sprintf('%s has both inlet/outlet P marked Known but P_out-P_in=%+.3e Pa.', uName, sOut.P - sIn.P);
+                        end
+                    end
+                end
+
+                if isprop(unit, 'Tout') && isfinite(unit.Tout) && isprop(unit, 'outlet')
+                    sOut = unit.outlet;
+                    if obj.isKnownFlagTrue(sOut, 'T') && abs(sOut.T - unit.Tout) > 1e-9
+                        issues(end+1,1) = sprintf('%s Tout=%.6g K conflicts with Known outlet T=%.6g K on stream %s.', ...
+                            uName, unit.Tout, sOut.T, string(sOut.name));
+                    end
+                end
+
+                if isprop(unit, 'Pout') && isfinite(unit.Pout) && isprop(unit, 'outlet')
+                    sOut = unit.outlet;
+                    if obj.isKnownFlagTrue(sOut, 'P') && abs(sOut.P - unit.Pout) > 1e-6
+                        issues(end+1,1) = sprintf('%s Pout=%.6g Pa conflicts with Known outlet P=%.6g Pa on stream %s.', ...
+                            uName, unit.Pout, sOut.P, string(sOut.name));
+                    end
+                end
+            end
+        end
+
+        function tf = isKnownFlagTrue(~, s, field)
+            tf = false;
+            if ~(isprop(s,'known') && isstruct(s.known) && isfield(s.known, field))
+                return
+            end
+            v = s.known.(field);
+            tf = islogical(v) && isscalar(v) && v;
+        end
+
+        function checkInitialJacobianConnectivity(obj, x, r0)
+            if isempty(x)
+                return
+            end
+
+            J0 = obj.fdJacobianSafe(x, r0);
+            colNormInf = max(abs(J0), [], 1);
+            dead = find(colNormInf <= obj.jacobianDeadColumnTol | ~isfinite(colNormInf));
+            if isempty(dead)
+                return
+            end
+
+            msgLines = strings(numel(dead),1);
+            for i = 1:numel(dead)
+                k = dead(i);
+                msgLines(i) = obj.describeUnknown(obj.map(k));
+                obj.log('Jacobian dead-column candidate: x(%d) %s (||J(:,k)||_inf=%.3e)', ...
+                    k, msgLines(i), colNormInf(k));
+            end
+
+            msg = sprintf(['Detected %d unknown(s) with near-zero initial Jacobian columns. ' ...
+                'This indicates disconnected DOFs, conflicting constraints, or numerically flat equations.'], numel(dead));
+            if obj.failOnJacobianDeadColumns
+                error('%s Unknown(s): %s', msg, strjoin(cellstr(msgLines), '; '));
+            else
+                warning('%s Unknown(s): %s', msg, strjoin(cellstr(msgLines), '; '));
+            end
+        end
+
+        function txt = describeUnknown(~, m)
+            if strcmp(m.var, 'u')
+                txt = sprintf('[unit %d] manipulated %s.%s', m.unitIndex, class(m.owner), m.field);
+                return
+            end
+
+            si = m.streamIndex;
+            switch m.var
+                case 'z'
+                    txt = sprintf('[stream %d] n_dot(log)', si);
+                case 'a'
+                    txt = sprintf('[stream %d] composition logit comp=%d', si, m.subIndex);
+                case 'T'
+                    txt = sprintf('[stream %d] temperature', si);
+                case 'P'
+                    txt = sprintf('[stream %d] pressure', si);
+                otherwise
+                    txt = sprintf('[stream %d] var=%s', si, m.var);
             end
         end
 
