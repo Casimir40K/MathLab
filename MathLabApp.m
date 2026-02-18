@@ -605,7 +605,7 @@ classdef MathLabApp < handle
             N = numel(app.speciesNames);
             data = cell(N, 6);
             try
-                lib = thermo.ThermoLibrary();
+                lib = proc.thermo.ThermoLibrary();
             catch
                 lib = [];
             end
@@ -2445,22 +2445,22 @@ classdef MathLabApp < handle
                             fprintf(fid, 'fs.addUnit(proc.units.Constraint(%s, ''%s'', %.6g, %.6g));\n', ...
                                 def.stream, def.field, def.value, def.index);
                         case 'Heater'
-                            fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
-                            fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
+                            fprintf(fid, 'thermoLib = proc.thermo.ThermoLibrary();\n');
+                            fprintf(fid, 'mix = proc.thermo.IdealGasMixture(species, thermoLib);\n');
                             args = '';
                             if isfield(def,'Tout'), args = sprintf(', ''Tout'', %.6g', def.Tout); end
                             if isfield(def,'duty'), args = sprintf(', ''duty'', %.6g', def.duty); end
                             fprintf(fid, 'fs.addUnit(proc.units.Heater(%s, %s, mix%s));\n', def.inlet, def.outlet, args);
                         case 'Cooler'
-                            fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
-                            fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
+                            fprintf(fid, 'thermoLib = proc.thermo.ThermoLibrary();\n');
+                            fprintf(fid, 'mix = proc.thermo.IdealGasMixture(species, thermoLib);\n');
                             args = '';
                             if isfield(def,'Tout'), args = sprintf(', ''Tout'', %.6g', def.Tout); end
                             if isfield(def,'duty'), args = sprintf(', ''duty'', %.6g', def.duty); end
                             fprintf(fid, 'fs.addUnit(proc.units.Cooler(%s, %s, mix%s));\n', def.inlet, def.outlet, args);
                         case 'HeatExchanger'
-                            fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
-                            fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
+                            fprintf(fid, 'thermoLib = proc.thermo.ThermoLibrary();\n');
+                            fprintf(fid, 'mix = proc.thermo.IdealGasMixture(species, thermoLib);\n');
                             args = '';
                             if isfield(def,'Th_out'), args = sprintf(', ''Th_out'', %.6g', def.Th_out); end
                             if isfield(def,'Tc_out'), args = sprintf(', ''Tc_out'', %.6g', def.Tc_out); end
@@ -2468,16 +2468,16 @@ classdef MathLabApp < handle
                             fprintf(fid, 'fs.addUnit(proc.units.HeatExchanger(%s, %s, %s, %s, mix%s));\n', ...
                                 def.hotInlet, def.hotOutlet, def.coldInlet, def.coldOutlet, args);
                         case 'Compressor'
-                            fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
-                            fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
+                            fprintf(fid, 'thermoLib = proc.thermo.ThermoLibrary();\n');
+                            fprintf(fid, 'mix = proc.thermo.IdealGasMixture(species, thermoLib);\n');
                             args = '';
                             if isfield(def,'Pout'), args = [args, sprintf(', ''Pout'', %.6g', def.Pout)]; end
                             if isfield(def,'PR'), args = [args, sprintf(', ''PR'', %.6g', def.PR)]; end
                             if isfield(def,'eta'), args = [args, sprintf(', ''eta'', %.6g', def.eta)]; end
                             fprintf(fid, 'fs.addUnit(proc.units.Compressor(%s, %s, mix%s));\n', def.inlet, def.outlet, args);
                         case 'Turbine'
-                            fprintf(fid, 'thermoLib = thermo.ThermoLibrary();\n');
-                            fprintf(fid, 'mix = thermo.IdealGasMixture(species, thermoLib);\n');
+                            fprintf(fid, 'thermoLib = proc.thermo.ThermoLibrary();\n');
+                            fprintf(fid, 'mix = proc.thermo.IdealGasMixture(species, thermoLib);\n');
                             args = '';
                             if isfield(def,'Pout'), args = [args, sprintf(', ''Pout'', %.6g', def.Pout)]; end
                             if isfield(def,'PR'), args = [args, sprintf(', ''PR'', %.6g', def.PR)]; end
@@ -2781,8 +2781,8 @@ classdef MathLabApp < handle
             % Build an IdealGasMixture from the current species list.
             % Returns [] if any species is missing from the thermo library.
             try
-                lib = thermo.ThermoLibrary();
-                mix = thermo.IdealGasMixture(app.speciesNames, lib);
+                lib = proc.thermo.ThermoLibrary();
+                mix = proc.thermo.IdealGasMixture(app.speciesNames, lib);
             catch
                 mix = [];
             end
