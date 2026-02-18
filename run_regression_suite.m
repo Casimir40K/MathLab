@@ -378,7 +378,7 @@ end
 % =========================================================================
 
 function testThermoShomateSpecies()
-    lib = thermo.ThermoLibrary();
+    lib = proc.thermo.ThermoLibrary();
 
     % --- N2 at 500 K: cp should be ~29.1 J/(mol*K) = 29.1 kJ/(kmol*K) ---
     n2 = lib.get('N2');
@@ -414,9 +414,9 @@ function testThermoShomateSpecies()
 end
 
 function testThermoIdealGasMixture()
-    lib = thermo.ThermoLibrary();
+    lib = proc.thermo.ThermoLibrary();
     species = {'N2', 'O2'};
-    mix = thermo.IdealGasMixture(species, lib);
+    mix = proc.thermo.IdealGasMixture(species, lib);
 
     z = [0.79, 0.21];  % air-like
 
@@ -467,9 +467,9 @@ function testThermoIdealGasMixture()
 end
 
 function testCompressorSolve()
-    lib = thermo.ThermoLibrary();
+    lib = proc.thermo.ThermoLibrary();
     species = {'N2', 'O2'};
-    mix = thermo.IdealGasMixture(species, lib);
+    mix = proc.thermo.IdealGasMixture(species, lib);
 
     fs = proc.Flowsheet(species);
 
@@ -522,9 +522,9 @@ function testCompressorSolve()
 end
 
 function testTurbineSolve()
-    lib = thermo.ThermoLibrary();
+    lib = proc.thermo.ThermoLibrary();
     species = {'N2', 'O2'};
-    mix = thermo.IdealGasMixture(species, lib);
+    mix = proc.thermo.IdealGasMixture(species, lib);
 
     fs = proc.Flowsheet(species);
 
@@ -558,9 +558,9 @@ function testTurbineSolve()
 end
 
 function testHeaterCoolerSolve()
-    lib = thermo.ThermoLibrary();
+    lib = proc.thermo.ThermoLibrary();
     species = {'N2', 'O2'};
-    mix = thermo.IdealGasMixture(species, lib);
+    mix = proc.thermo.IdealGasMixture(species, lib);
 
     % --- Heater with specified Tout ---
     fs = proc.Flowsheet(species);
@@ -616,9 +616,9 @@ function testHeaterCoolerSolve()
 end
 
 function testHeatExchangerSolve()
-    lib = thermo.ThermoLibrary();
+    lib = proc.thermo.ThermoLibrary();
     species = {'N2', 'O2'};
-    mix = thermo.IdealGasMixture(species, lib);
+    mix = proc.thermo.IdealGasMixture(species, lib);
 
     fs = proc.Flowsheet(species);
 
