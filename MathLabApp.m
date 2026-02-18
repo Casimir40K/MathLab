@@ -57,6 +57,11 @@ classdef MathLabApp < handle
         DOFLabel
         ResidualAxes
         LogArea
+        SolveIterLabel
+        SolveAvgTimeLabel
+        SolveElapsedLabel
+        SolveTimer
+        SolveStartTic
 
         % -- Tab 5: Results --
         ResultsTab
@@ -229,7 +234,8 @@ classdef MathLabApp < handle
         function buildUI(app)
             app.Fig = uifigure('Name','MathLab — Process Solver', ...
                 'Position',[60 40 1120 720], 'Resize','on', ...
-                'Color',[0.96 0.96 0.97]);
+                'Color',[0.96 0.96 0.97], ...
+                'DeleteFcn', @(~,~) app.stopSolveTimer());
 
             gl = uigridlayout(app.Fig, [2 1], ...
                 'RowHeight',{'1x', 24}, 'Padding',[0 0 0 0], 'RowSpacing',0);
@@ -511,40 +517,60 @@ classdef MathLabApp < handle
             t = uitab(app.Tabs, 'Title', ' Solve ');
             app.SolveTab = t;
 
-            % 4 rows: DOF bar | controls row | convergence plot | log
-            gl = uigridlayout(t, [4 1], ...
-                'RowHeight', {28, 40, '2x', '1x'}, ...
-                'Padding', [12 12 12 12], 'RowSpacing', 8);
+            % 5 rows: DOF bar | controls row | metrics bar | convergence plot | log
+            gl = uigridlayout(t, [5 1], ...
+                'RowHeight', {32, 42, 28, '2x', '1x'}, ...
+                'Padding', [14 14 14 14], 'RowSpacing', 8);
 
             % --- Row 1: DOF status ---
-            app.DOFLabel = uilabel(gl, 'Text', 'DOF: — (add streams and units first)', ...
-                'FontWeight','bold', 'FontSize', 14, ...
-                'BackgroundColor',[0.92 0.93 0.95]);
-            app.DOFLabel.Layout.Row = 1;
+            dofG = uigridlayout(gl, [1 1], 'Padding', [10 4 10 4]);
+            dofG.Layout.Row = 1;
+            dofG.BackgroundColor = [0.92 0.94 0.97];
+            app.DOFLabel = uilabel(dofG, 'Text', 'DOF: — (add streams and units first)', ...
+                'FontWeight','bold', 'FontSize', 13, ...
+                'FontColor', [0.20 0.25 0.35]);
 
             % --- Row 2: solver controls ---
-            ctrlG = uigridlayout(gl, [1 5], ...
-                'ColumnWidth', {120, 80, 120, 110, 180}, ...
-                'Padding', [0 0 0 0], 'ColumnSpacing', 8);
+            ctrlG = uigridlayout(gl, [1 6], ...
+                'ColumnWidth', {120, 80, 120, 110, '1x', 160}, ...
+                'Padding', [0 0 0 0], 'ColumnSpacing', 10);
             ctrlG.Layout.Row = 2;
 
             uilabel(ctrlG, 'Text', 'Max Iterations:', ...
-                'HorizontalAlignment','right', 'FontWeight','bold');
+                'HorizontalAlignment','right', 'FontWeight','bold', ...
+                'FontSize', 12, 'FontColor', [0.25 0.25 0.30]);
             app.MaxIterField = uieditfield(ctrlG, 'numeric', 'Value', 200, ...
                 'Limits', [1 100000], 'RoundFractionalValues', 'on');
             uilabel(ctrlG, 'Text', 'Tolerance (abs):', ...
-                'HorizontalAlignment','right', 'FontWeight','bold');
+                'HorizontalAlignment','right', 'FontWeight','bold', ...
+                'FontSize', 12, 'FontColor', [0.25 0.25 0.30]);
             app.TolField = uieditfield(ctrlG, 'numeric', 'Value', 1e-9, ...
                 'Limits', [1e-15 1]);
+            uilabel(ctrlG, 'Text', '');  % spacer
             app.SolveBtn = uibutton(ctrlG, 'push', 'Text', 'SOLVE', ...
                 'FontWeight','bold', 'FontSize', 16, ...
                 'BackgroundColor', [0.18 0.62 0.30], 'FontColor', 'w', ...
                 'ButtonPushedFcn', @(~,~) app.runSolver());
 
-            % --- Row 3: convergence plot ---
-            plotP = uipanel(gl, 'Title','Convergence (real-time)', 'FontWeight','bold');
-            plotP.Layout.Row = 3;
-            plotG = uigridlayout(plotP, [1 1], 'Padding',[4 4 4 4]);
+            % --- Row 3: live metrics bar ---
+            metG = uigridlayout(gl, [1 3], ...
+                'ColumnWidth', {'1x','1x','1x'}, ...
+                'Padding', [10 3 10 3], 'ColumnSpacing', 16);
+            metG.Layout.Row = 3;
+            metG.BackgroundColor = [0.94 0.95 0.97];
+            app.SolveIterLabel = uilabel(metG, 'Text', 'Iteration: —', ...
+                'FontSize', 12, 'FontColor', [0.30 0.30 0.35]);
+            app.SolveAvgTimeLabel = uilabel(metG, 'Text', 'Avg time/iter: —', ...
+                'FontSize', 12, 'FontColor', [0.30 0.30 0.35], ...
+                'HorizontalAlignment', 'center');
+            app.SolveElapsedLabel = uilabel(metG, 'Text', 'Elapsed: 00:00', ...
+                'FontSize', 12, 'FontColor', [0.30 0.30 0.35], ...
+                'HorizontalAlignment', 'right');
+
+            % --- Row 4: convergence plot ---
+            plotP = uipanel(gl, 'Title','Convergence', 'FontWeight','bold');
+            plotP.Layout.Row = 4;
+            plotG = uigridlayout(plotP, [1 1], 'Padding',[6 6 6 6]);
             app.ResidualAxes = uiaxes(plotG);
             ylabel(app.ResidualAxes, '||residual||');
             xlabel(app.ResidualAxes, 'Iteration');
@@ -552,10 +578,10 @@ classdef MathLabApp < handle
             grid(app.ResidualAxes, 'on');
             title(app.ResidualAxes, 'Click SOLVE to start');
 
-            % --- Row 4: solver log ---
+            % --- Row 5: solver log ---
             logP = uipanel(gl, 'Title','Solver Log', 'FontWeight','bold');
-            logP.Layout.Row = 4;
-            logG = uigridlayout(logP, [1 1], 'Padding',[4 4 4 4]);
+            logP.Layout.Row = 5;
+            logG = uigridlayout(logP, [1 1], 'Padding',[6 6 6 6]);
             app.LogArea = uitextarea(logG, 'Editable','off', ...
                 'FontName','Consolas', 'FontSize',11);
         end
@@ -2121,7 +2147,7 @@ classdef MathLabApp < handle
 
             % Prepare real-time plot
             cla(app.ResidualAxes);
-            hLine = animatedline(app.ResidualAxes, 'Color',[0.15 0.5 0.75], ...
+            hLine = animatedline(app.ResidualAxes, 'Color',[0.15 0.50 0.75], ...
                 'LineWidth',1.8, 'Marker','o', 'MarkerSize',3);
             yline(app.ResidualAxes, tol, '--r', 'Tolerance', 'LineWidth',1);
             xlabel(app.ResidualAxes,'Iteration');
@@ -2131,6 +2157,19 @@ classdef MathLabApp < handle
             title(app.ResidualAxes,'Solving...');
 
             app.LogArea.Value = {'Solving...'};
+
+            % Reset metrics bar
+            app.SolveIterLabel.Text = 'Iteration: 0';
+            app.SolveAvgTimeLabel.Text = 'Avg time/iter: —';
+            app.SolveElapsedLabel.Text = 'Elapsed: 00:00';
+
+            % Start elapsed-time clock (updates every 0.25s)
+            app.SolveStartTic = tic;
+            app.SolveTimer = timer('ExecutionMode','fixedRate', ...
+                'Period', 0.25, 'TimerFcn', @(~,~) app.updateElapsedClock(), ...
+                'ErrorFcn', @(~,~) []);
+            start(app.SolveTimer);
+
             drawnow;
 
             app.resultsSnapshots = {};
@@ -2142,6 +2181,17 @@ classdef MathLabApp < handle
             function iterCb(iter, rNorm)
                 addpoints(hLine, iter, rNorm);
                 app.captureResultsSnapshot(iter, rNorm);
+                % Update iteration count & avg time
+                elapsed = toc(app.SolveStartTic);
+                app.SolveIterLabel.Text = sprintf('Iteration: %d', iter);
+                if iter > 0
+                    avgMs = (elapsed / iter) * 1000;
+                    if avgMs >= 1000
+                        app.SolveAvgTimeLabel.Text = sprintf('Avg time/iter: %.2f s', avgMs/1000);
+                    else
+                        app.SolveAvgTimeLabel.Text = sprintf('Avg time/iter: %.1f ms', avgMs);
+                    end
+                end
                 drawnow limitrate;
             end
 
@@ -2157,10 +2207,27 @@ classdef MathLabApp < handle
                     'iterCallback',@iterCb);
                 app.lastSolver = solver;
 
+                % Stop elapsed clock
+                app.stopSolveTimer();
+
+                % Final metrics update
+                nIter = numel(solver.residualHistory) - 1;
+                elapsed = toc(app.SolveStartTic);
+                app.SolveIterLabel.Text = sprintf('Iteration: %d', nIter);
+                app.updateElapsedClock();
+                if nIter > 0
+                    avgMs = (elapsed / nIter) * 1000;
+                    if avgMs >= 1000
+                        app.SolveAvgTimeLabel.Text = sprintf('Avg time/iter: %.2f s', avgMs/1000);
+                    else
+                        app.SolveAvgTimeLabel.Text = sprintf('Avg time/iter: %.1f ms', avgMs);
+                    end
+                end
+
                 % Final plot cleanup
                 if solver.converged
                     title(app.ResidualAxes, ...
-                        sprintf('Converged in %d iterations', numel(solver.residualHistory)-1));
+                        sprintf('Converged in %d iterations', nIter));
                     app.setStatus('Solve completed.');
                 else
                     title(app.ResidualAxes, 'NON-CONVERGED');
@@ -2169,7 +2236,7 @@ classdef MathLabApp < handle
 
                 app.LogArea.Value = cellstr(solver.logLines);
 
-                app.captureResultsSnapshot(numel(solver.residualHistory)-1, solver.residualHistory(end));
+                app.captureResultsSnapshot(nIter, solver.residualHistory(end));
                 app.refreshResultsSummaryModel();
 
                 app.refreshResultsTable();
@@ -2180,6 +2247,7 @@ classdef MathLabApp < handle
                 app.refreshStreamTables();
 
             catch ME
+                app.stopSolveTimer();
                 app.resultsSummary = struct('status','Solve failed','residual',NaN,'iterations',0, ...
                     'streamKey','-','unitKey','-','streamText','-','unitText','-','deltaText','-');
                 app.refreshResultsSummaryPanel();
@@ -2197,6 +2265,28 @@ classdef MathLabApp < handle
             end
         end
 
+
+        function updateElapsedClock(app)
+            if isempty(app.SolveStartTic), return; end
+            elapsed = toc(app.SolveStartTic);
+            mins = floor(elapsed / 60);
+            secs = floor(mod(elapsed, 60));
+            if mins >= 60
+                hrs = floor(mins / 60);
+                mins = mod(mins, 60);
+                app.SolveElapsedLabel.Text = sprintf('Elapsed: %d:%02d:%02d', hrs, mins, secs);
+            else
+                app.SolveElapsedLabel.Text = sprintf('Elapsed: %02d:%02d', mins, secs);
+            end
+        end
+
+        function stopSolveTimer(app)
+            if ~isempty(app.SolveTimer) && isvalid(app.SolveTimer)
+                stop(app.SolveTimer);
+                delete(app.SolveTimer);
+            end
+            app.SolveTimer = [];
+        end
 
         function refreshResultsTable(app)
             if isempty(app.ResultsAxes) || ~isvalid(app.ResultsAxes)
@@ -3052,7 +3142,6 @@ classdef MathLabApp < handle
                     grid(app.ResultsNyquistAxes,'on');
                     xlabel(app.ResultsNyquistAxes,'Re(\lambda)');
                     ylabel(app.ResultsNyquistAxes,'Im(\lambda)');
-                    legend(app.ResultsNyquistAxes,'Location','best','FontSize',8);
                     stableTxt = app.ternary(st.stable, 'STABLE', 'UNSTABLE');
                     title(app.ResultsNyquistAxes, sprintf('Generalised Nyquist | %s | max Re(pole)=%.3e', stableTxt, st.maxReal));
                     hold(app.ResultsNyquistAxes,'off');
